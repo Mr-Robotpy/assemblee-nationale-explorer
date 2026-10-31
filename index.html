@@ -3,1017 +3,277 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Assemblée Nationale - Open Data Explorer</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Assemblée Open Data Explorer</title>
+    <meta name="description" content="Explorateur citoyen des données ouvertes de l'Assemblée nationale (XVIIe législature) : députés, projets et propositions de loi, questions, scrutins.">
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        an: {
-                            blue: '#002654',
-                            red: '#CE1126',
-                            gold: '#C5A059',
-                            lightBg: '#F8FAFC',
-                            darkBg: '#0F172A',
-                            cardDark: '#1E293B'
-                        }
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif']
-                    }
-                }
+        // Thème appliqué avant le rendu pour éviter le flash
+        (function () {
+            let t = null;
+            try { t = localStorage.getItem('theme'); } catch (e) {}
+            if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
             }
-        }
+        })();
     </script>
-    <!-- Google Fonts & FontAwesome Icons -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: 'Inter', sans-serif; transition: background-color 0.3s, color 0.3s; }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.7); }
-        .gradient-border {
-            border-image: linear-gradient(to right, #002654, #ffffff, #CE1126) 1;
-        }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="assets/app.css">
 </head>
-<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-full flex flex-col transition-colors duration-200">
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-full flex flex-col">
 
-    <!-- Top Navigation Header -->
-    <header class="sticky top-0 z-40 w-full backdrop-blur border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <!-- Branding -->
-                <div class="flex items-center space-x-3">
-                    <div class="flex h-8 w-6 overflow-hidden rounded shadow-sm border border-slate-200 dark:border-slate-700">
-                        <div class="w-1/3 bg-[#002654]"></div>
-                        <div class="w-1/3 bg-white"></div>
-                        <div class="w-1/3 bg-[#CE1126]"></div>
-                    </div>
-                    <div>
-                        <span class="font-bold text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                            Assemblée Open Data <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">v2.4 API</span>
-                        </span>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">Explorateur citoyen des données parlementaires</p>
-                    </div>
+<header class="sticky top-0 z-40 w-full backdrop-blur border-b border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-900/85">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16 gap-3">
+            <a href="#/" class="flex items-center gap-3 min-w-0">
+                <div class="flex h-8 w-6 shrink-0 overflow-hidden rounded shadow-sm border border-slate-200 dark:border-slate-700">
+                    <div class="w-1/3 bg-[#002654]"></div><div class="w-1/3 bg-white"></div><div class="w-1/3 bg-[#CE1126]"></div>
                 </div>
-
-                <!-- Main Nav Links -->
-                <nav class="hidden md:flex space-x-1 lg:space-x-4 text-sm font-medium">
-                    <button onclick="switchTab('dashboard')" id="nav-dashboard" class="tab-btn px-3 py-2 rounded-md text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-slate-800 transition">
-                        <i class="fa-solid font-normal fa-chart-pie mr-1.5"></i>Vue d'ensemble
-                    </button>
-                    <button onclick="switchTab('deputies')" id="nav-deputies" class="tab-btn px-3 py-2 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                        <i class="fa-solid fa-users mr-1.5"></i>Députés
-                    </button>
-                    <button onclick="switchTab('bills')" id="nav-bills" class="tab-btn px-3 py-2 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                        <i class="fa-solid fa-file-contract mr-1.5"></i>Projets de Loi
-                    </button>
-                    <button onclick="switchTab('questions')" id="nav-questions" class="tab-btn px-3 py-2 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                        <i class="fa-solid fa-comments mr-1.5"></i>Questions
-                    </button>
-                    <button onclick="switchTab('api')" id="nav-api" class="tab-btn px-3 py-2 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                        <i class="fa-solid fa-code mr-1.5"></i>Console API
-                    </button>
-                </nav>
-
-                <!-- Actions / Controls -->
-                <div class="flex items-center space-x-3">
-                    <!-- Quick External Link -->
-                    <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hidden sm:inline-flex items-center text-xs text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg transition">
-                        <span>data.assemblee-nationale.fr</span>
-                        <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-                    </a>
-                    
-                    <!-- Dark Mode Toggle -->
-                    <button id="themeToggleBtn" onclick="toggleDarkMode()" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-600 transition" title="Basculer le thème">
-                        <i class="fa-solid fa-moon dark:hidden"></i>
-                        <i class="fa-solid fa-sun hidden dark:inline"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Mobile Navigation bar -->
-        <div class="md:hidden border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-2 py-2 flex justify-around text-xs">
-            <button onclick="switchTab('dashboard')" class="mobile-tab-btn flex flex-col items-center py-1 px-2 text-blue-600 dark:text-blue-400">
-                <i class="fa-solid fa-chart-pie mb-1"></i>Aperçu
-            </button>
-            <button onclick="switchTab('deputies')" class="mobile-tab-btn flex flex-col items-center py-1 px-2 text-slate-500 dark:text-slate-400">
-                <i class="fa-solid fa-users mb-1"></i>Députés
-            </button>
-            <button onclick="switchTab('bills')" class="mobile-tab-btn flex flex-col items-center py-1 px-2 text-slate-500 dark:text-slate-400">
-                <i class="fa-solid fa-file-contract mb-1"></i>Lois
-            </button>
-            <button onclick="switchTab('questions')" class="mobile-tab-btn flex flex-col items-center py-1 px-2 text-slate-500 dark:text-slate-400">
-                <i class="fa-solid fa-comments mb-1"></i>Questions
-            </button>
-            <button onclick="switchTab('api')" class="mobile-tab-btn flex flex-col items-center py-1 px-2 text-slate-500 dark:text-slate-400">
-                <i class="fa-solid fa-code mb-1"></i>API
-            </button>
-        </div>
-    </header>
-
-    <!-- Main Container -->
-    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-
-        <!-- ==================== TAB 1: DASHBOARD ==================== -->
-        <section id="tab-dashboard" class="tab-content space-y-6">
-            <!-- Hero Banner -->
-            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-6 sm:p-8 shadow-xl">
-                <div class="relative z-10 max-w-3xl space-y-3">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                        <i class="fa-solid fa-database mr-1.5"></i> XVIIe Législature en Direct
+                <div class="min-w-0">
+                    <span class="font-bold text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                        Assemblée Open Data
+                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">XVIIe</span>
                     </span>
-                    <h1 class="text-2xl sm:text-4xl font-extrabold tracking-tight">Observatoire Parlementaire</h1>
-                    <p class="text-sm sm:text-base text-slate-300">
-                        Explorez l'activité de l'Assemblée Nationale française à partir des données ouvertes officielles : travaux en commission, scrutins publics, représentativité et textes de loi.
-                    </p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block truncate" id="headerUpdated">Explorateur citoyen des données parlementaires</p>
                 </div>
-                <!-- Decorative background elements -->
-                <div class="absolute -right-10 -bottom-10 opacity-10 text-white text-9xl pointer-events-none">
-                    <i class="fa-solid fa-landmark"></i>
-                </div>
-            </div>
-
-            <!-- Metric Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex items-center justify-between">
-                    <div>
-                        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Effectif Députés</p>
-                        <h3 class="text-2xl font-bold text-slate-900 dark:text-white mt-1" id="kpi-deputies">577</h3>
-                        <p class="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-check-circle"></i> 577 sièges pourvus
-                        </p>
-                    </div>
-                    <div class="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-user-tie"></i>
-                    </div>
-                </div>
-
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex items-center justify-between">
-                    <div>
-                        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parité H/F</p>
-                        <h3 class="text-2xl font-bold text-slate-900 dark:text-white mt-1">37.3% <span class="text-xs font-normal text-slate-500">Femmes</span></h3>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                            215 Députées / 362 Hommes
-                        </p>
-                    </div>
-                    <div class="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-venus-mars"></i>
-                    </div>
-                </div>
-
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex items-center justify-between">
-                    <div>
-                        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Textes Adoptés</p>
-                        <h3 class="text-2xl font-bold text-slate-900 dark:text-white mt-1">48</h3>
-                        <p class="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-file-check"></i> Session courante
-                        </p>
-                    </div>
-                    <div class="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-gavel"></i>
-                    </div>
-                </div>
-
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex items-center justify-between">
-                    <div>
-                        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Questions Posées</p>
-                        <h3 class="text-2xl font-bold text-slate-900 dark:text-white mt-1">14,890</h3>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                            Orales & Écrites
-                        </p>
-                    </div>
-                    <div class="w-12 h-12 rounded-xl bg-amber-50 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-comments font-normal"></i>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Charts Section -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Political Groups Breakdown Chart -->
-                <div class="lg:col-span-2 bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm">
-                    <div class="flex items-center justify-between mb-4">
-                        <h2 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <i class="fa-solid fa-chart-bar text-blue-600"></i> Répartition des Groupes Politiques
-                        </h2>
-                        <span class="text-xs text-slate-500">Majorité relative: 289 sièges</span>
-                    </div>
-                    <div class="h-64 sm:h-80 relative">
-                        <canvas id="chartGroups"></canvas>
-                    </div>
-                </div>
-
-                <!-- Gender Parity & Activity Donut -->
-                <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex flex-col justify-between">
-                    <div>
-                        <h2 class="font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                            <i class="fa-solid fa-chart-pie text-purple-600"></i> Répartition par Genre
-                        </h2>
-                        <div class="h-56 relative flex items-center justify-center">
-                            <canvas id="chartGender"></canvas>
-                        </div>
-                    </div>
-                    <div class="mt-4 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-xs text-slate-600 dark:text-slate-300">
-                        <i class="fa-solid fa-lightbulb text-amber-500 mr-1"></i>
-                        La parité a progressé de +12% au cours des 3 dernières législatures.
-                    </div>
-                </div>
-            </div>
-
-            <!-- Recent Activity Timeline / Highlights -->
-            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-4">
-                <h2 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <i class="fa-solid fa-clock-rotate-left text-blue-600"></i> Derniers Événements Parlementaires
-                </h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700">
-                        <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-                            <span>Scrutin Public n°412</span>
-                            <span class="text-emerald-600 font-semibold bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded">Adopté</span>
-                        </div>
-                        <h4 class="font-semibold text-sm text-slate-900 dark:text-white">Projet de loi sur la Transition Énergétique</h4>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">Pour: 312 | Contre: 198 | Abstentions: 45</p>
-                    </div>
-
-                    <div class="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700">
-                        <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-                            <span>Commission des Finances</span>
-                            <span class="text-blue-600 font-semibold bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded">En cours</span>
-                        </div>
-                        <h4 class="font-semibold text-sm text-slate-900 dark:text-white">Audition du Ministre de l'Économie</h4>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">Examen du projet de loi de finances rectificative.</p>
-                    </div>
-
-                    <div class="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700">
-                        <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-                            <span>Questions au Gouvernement</span>
-                            <span class="text-purple-600 font-semibold bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded">Séance Publique</span>
-                        </div>
-                        <h4 class="font-semibold text-sm text-slate-900 dark:text-white">Session hebdomadaire des QAG</h4>
-                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">28 questions oralement transmises aux ministres.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ==================== TAB 2: DEPUTIES EXPLORER ==================== -->
-        <section id="tab-deputies" class="tab-content hidden space-y-6">
-            <!-- Search & Filters Header -->
-            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-4">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Annuaire des Députés</h2>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">Recherchez et filtrez les parlementaires de la XVIIe Législature</p>
-                    </div>
-
-                    <!-- Search bar -->
-                    <div class="relative min-w-[260px] sm:min-w-[320px]">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                        <input type="text" id="deputySearch" placeholder="Rechercher par nom, circonscription..." 
-                            oninput="filterDeputies()"
-                            class="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white">
-                    </div>
-                </div>
-
-                <!-- Filters Grid -->
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Groupe Politique</label>
-                        <select id="filterGroup" onchange="filterDeputies()" class="w-full text-xs p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg dark:text-white">
-                            <option value="">Tous les groupes</option>
-                            <option value="RN">Rassemblement National (RN)</option>
-                            <option value="EPR">Ensemble Pour la République (EPR)</option>
-                            <option value="LFI">La France Insoumise - NFP (LFI-NFP)</option>
-                            <option value="SOC">Socialistes et apparentés (SOC)</option>
-                            <option value="DR">Droite Républicaine (DR)</option>
-                            <option value="Eco">Écologiste et Social (ECO)</option>
-                            <option value="DEM">Les Démocrates (DEM)</option>
-                            <option value="LIOT">LIOT</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Commission</label>
-                        <select id="filterCommittee" onchange="filterDeputies()" class="w-full text-xs p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg dark:text-white">
-                            <option value="">Toutes les commissions</option>
-                            <option value="Finances">Finances</option>
-                            <option value="Lois">Lois constitutionnelles</option>
-                            <option value="Affaires étrangères">Affaires étrangères</option>
-                            <option value="Défense">Défense nationale</option>
-                            <option value="Affaires sociales">Affaires sociales</option>
-                            <option value="Développement durable">Développement durable</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Trier Par</label>
-                        <select id="filterSort" onchange="filterDeputies()" class="w-full text-xs p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg dark:text-white">
-                            <option value="name">Nom (A-Z)</option>
-                            <option value="activity">Activité (Interventions)</option>
-                            <option value="dept">Département</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Deputy Cards Grid -->
-            <div id="deputiesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                <!-- Dynamically Rendered -->
-            </div>
-        </section>
-
-        <!-- ==================== TAB 3: BILLS & WORKFLOW ==================== -->
-        <section id="tab-bills" class="tab-content hidden space-y-6">
-            <!-- Header -->
-            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm">
-                <h2 class="text-xl font-bold text-slate-900 dark:text-white">Navette Parlementaire & Projets de Loi</h2>
-                <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Suivez le parcours législatif complet des textes à l'Assemblée et au Sénat</p>
-            </div>
-
-            <!-- Legislative Process Visualizer Banner -->
-            <div class="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-6">
-                <h3 class="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">Parcours d'une Loi (Navette Parlementaire)</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-5 gap-2 text-center">
-                    <div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <span class="text-xs font-bold text-blue-600 dark:text-blue-400">1. Dépôt</span>
-                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1">Gouvernement ou Député</p>
-                    </div>
-                    <div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <span class="text-xs font-bold text-blue-600 dark:text-blue-400">2. Commission</span>
-                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1">Examen & Amendements</p>
-                    </div>
-                    <div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <span class="text-xs font-bold text-blue-600 dark:text-blue-400">3. Séance Publique</span>
-                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1">Débats & Vote final</p>
-                    </div>
-                    <div class="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                        <span class="text-xs font-bold text-indigo-600 dark:text-indigo-400">4. Sénat</span>
-                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1">Examen parallèle</p>
-                    </div>
-                    <div class="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                        <span class="text-xs font-bold text-emerald-600 dark:text-emerald-400">5. Promulgation</span>
-                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1">Journal Officiel</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- List of Active Bills -->
-            <div id="billsList" class="space-y-4">
-                <!-- Rendered dynamically -->
-            </div>
-        </section>
-
-        <!-- ==================== TAB 4: QUESTIONS ==================== -->
-        <section id="tab-questions" class="tab-content hidden space-y-6">
-            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-4">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Questions au Gouvernement & Écrites</h2>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">Contrôle de l'action gouvernementale par les parlementaires</p>
-                    </div>
-                    <!-- Type Filter -->
-                    <div class="flex gap-2 text-xs">
-                        <button onclick="filterQuestionsType('all')" id="qtype-all" class="qtype-btn px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">Toutes</button>
-                        <button onclick="filterQuestionsType('QAG')" id="qtype-QAG" class="qtype-btn px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium">QAG (Orales)</button>
-                        <button onclick="filterQuestionsType('QE')" id="qtype-QE" class="qtype-btn px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium">QE (Écrites)</button>
-                    </div>
-                </div>
-
-                <input type="text" id="questionSearch" placeholder="Rechercher une question par mot-clé, ministre interpellé ou sujet..." 
-                    oninput="renderQuestions()"
-                    class="w-full px-4 py-2 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white">
-            </div>
-
-            <!-- Questions Stream Container -->
-            <div id="questionsContainer" class="space-y-3">
-                <!-- Rendered dynamically -->
-            </div>
-        </section>
-
-        <!-- ==================== TAB 5: API CONSOLE ==================== -->
-        <section id="tab-api" class="tab-content hidden space-y-6">
-            <div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <i class="fa-solid fa-terminal text-blue-600"></i> Console Open Data Live API
-                        </h2>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">Simulateur et testeur de requêtes pour data.assemblee-nationale.fr</p>
-                    </div>
-                    <span class="text-xs px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 font-medium rounded-full">
-                        API Active
-                    </span>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <!-- Endpoint Selector -->
-                    <div class="space-y-3">
-                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase">Endpoint Officiel</label>
-                        <select id="apiEndpoint" class="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg dark:text-white font-mono">
-                            <option value="/actor/PA795828.json">/acteurs/PA795828.json (Fiche Député)</option>
-                            <option value="/scrutins/VT2024_089.json">/scrutins/VT2024_089.json (Détail Scrutin)</option>
-                            <option value="/dossiers/DLR5L16N458.json">/dossiers/DLR5L16N458.json (Dossier Législatif)</option>
-                            <option value="/organes/PO800537.json">/organes/PO800537.json (Groupe Politique)</option>
-                        </select>
-
-                        <button onclick="executeApiQuery()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition shadow">
-                            <i class="fa-solid fa-play"></i> Exécuter la Requête
-                        </button>
-                        
-                        <div class="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-lg text-xs text-slate-600 dark:text-slate-400 space-y-2 border border-slate-200 dark:border-slate-700">
-                            <p class="font-semibold text-slate-800 dark:text-slate-200"><i class="fa-solid fa-circle-info mr-1 text-blue-500"></i> Formats supportés:</p>
-                            <ul class="list-disc pl-4 space-y-1">
-                                <li>JSON structuré</li>
-                                <li>XML Schema (Akoma Ntoso)</li>
-                                <li>Archives ZIP (OpenData bulk)</li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <!-- Output Console Viewport -->
-                    <div class="lg:col-span-2 space-y-2">
-                        <div class="flex justify-between items-center bg-slate-900 text-slate-300 px-4 py-2 rounded-t-lg text-xs font-mono">
-                            <span>HTTP 200 OK — JSON Response</span>
-                            <button onclick="copyApiOutput()" class="hover:text-white"><i class="fa-solid fa-copy"></i> Copier</button>
-                        </div>
-                        <pre id="apiConsoleOutput" class="bg-slate-950 text-emerald-400 p-4 rounded-b-lg font-mono text-xs overflow-x-auto h-72 custom-scrollbar shadow-inner leading-relaxed">// Cliquez sur 'Exécuter la Requête' pour charger les données simulées...</pre>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- Deputy Detail Modal -->
-    <div id="deputyModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 relative animate-fade-in">
-            <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white p-2 text-lg">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-            <div id="modalContent">
-                <!-- Rendered dynamically -->
+            </a>
+            <nav class="hidden lg:flex gap-1 text-sm font-medium" id="desktopNav">
+                <a href="#/" data-tab="dashboard" class="tab-link"><i class="fa-solid fa-chart-pie"></i>Vue d'ensemble</a>
+                <a href="#/deputes" data-tab="deputes" class="tab-link"><i class="fa-solid fa-users"></i>Députés</a>
+                <a href="#/lois" data-tab="lois" class="tab-link"><i class="fa-solid fa-file-contract"></i>Lois</a>
+                <a href="#/questions" data-tab="questions" class="tab-link"><i class="fa-solid fa-comments"></i>Questions</a>
+                <a href="#/scrutins" data-tab="scrutins" class="tab-link"><i class="fa-solid fa-check-to-slot"></i>Scrutins</a>
+                <a href="#/donnees" data-tab="donnees" class="tab-link"><i class="fa-solid fa-code"></i>Données</a>
+            </nav>
+            <div class="flex items-center gap-2">
+                <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hidden sm:inline-flex items-center text-xs text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg">
+                    data.assemblee-nationale.fr <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                </a>
+                <button id="themeToggle" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-600" title="Basculer le thème" aria-label="Basculer le thème">
+                    <i class="fa-solid fa-moon dark:hidden"></i><i class="fa-solid fa-sun hidden dark:inline"></i>
+                </button>
             </div>
         </div>
     </div>
+    <nav class="lg:hidden border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-1 py-1.5 grid grid-cols-6 text-[11px]" id="mobileNav">
+        <a href="#/" data-tab="dashboard" class="mobile-link"><i class="fa-solid fa-chart-pie"></i>Aperçu</a>
+        <a href="#/deputes" data-tab="deputes" class="mobile-link"><i class="fa-solid fa-users"></i>Députés</a>
+        <a href="#/lois" data-tab="lois" class="mobile-link"><i class="fa-solid fa-file-contract"></i>Lois</a>
+        <a href="#/questions" data-tab="questions" class="mobile-link"><i class="fa-solid fa-comments"></i>Questions</a>
+        <a href="#/scrutins" data-tab="scrutins" class="mobile-link"><i class="fa-solid fa-check-to-slot"></i>Scrutins</a>
+        <a href="#/donnees" data-tab="donnees" class="mobile-link"><i class="fa-solid fa-code"></i>Données</a>
+    </nav>
+</header>
 
-    <!-- Footer -->
-    <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
-        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
-            <p>© 2026 Observatoire Citoyen — Réalisé avec la plateforme Open Data de l'Assemblée Nationale</p>
-            <div class="flex items-center space-x-4">
-                <a href="https://data.assemblee-nationale.fr/" target="_blank" class="hover:underline">Portail Open Data</a>
-                <span>•</span>
-                <a href="#" class="hover:underline">Licence Ouverte v2.0</a>
+<main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div id="globalError" class="hidden mb-6 p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-200 text-sm"></div>
+
+    <!-- ==================== VUE D'ENSEMBLE ==================== -->
+    <section id="tab-dashboard" class="tab-content space-y-6">
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-6 sm:p-8 shadow-xl">
+            <div class="relative z-10 max-w-3xl space-y-3">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                    <i class="fa-solid fa-database mr-1.5"></i><span id="heroUpdated">Données officielles · XVIIe législature</span>
+                </span>
+                <h1 class="text-2xl sm:text-4xl font-extrabold tracking-tight">Observatoire parlementaire</h1>
+                <p class="text-sm sm:text-base text-slate-300">
+                    Députés, projets et propositions de loi, questions au Gouvernement et scrutins publics,
+                    reconstruits automatiquement chaque jour à partir de l'Open Data de l'Assemblée nationale.
+                </p>
+            </div>
+            <div class="absolute -right-10 -bottom-10 opacity-10 text-white text-9xl pointer-events-none"><i class="fa-solid fa-landmark"></i></div>
+        </div>
+        <div id="kpis" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="card lg:col-span-2">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="card-title"><i class="fa-solid fa-chart-bar text-blue-600"></i>Groupes politiques</h2>
+                    <span class="text-xs text-slate-500" id="majorityLabel"></span>
+                </div>
+                <div class="h-72 relative"><canvas id="chartGroups"></canvas></div>
+            </div>
+            <div class="card">
+                <h2 class="card-title mb-4"><i class="fa-solid fa-venus-mars text-purple-600"></i>Répartition femmes / hommes</h2>
+                <div class="h-60 relative"><canvas id="chartGender"></canvas></div>
             </div>
         </div>
-    </footer>
-
-    <!-- JavaScript Application Logic -->
-    <script>
-        /* ==================== MOCK DATASET ==================== */
-        const DEPUTIES_DATA = [
-            {
-                id: "PA795828",
-                name: "Yaël BRAUN-PIVET",
-                group: "EPR",
-                groupLong: "Ensemble Pour la République",
-                dept: "Yvelines (78)",
-                circo: "5ème circonscription",
-                gender: "F",
-                commission: "Présidence de l'Assemblée",
-                role: "Présidente de l'Assemblée nationale",
-                photo: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-                interventions: 420,
-                amendmentsProposed: 12,
-                votingAffinity: "98%"
-            },
-            {
-                id: "PA719866",
-                name: "Gabriel ATTAL",
-                group: "EPR",
-                groupLong: "Ensemble Pour la République",
-                dept: "Hauts-de-Seine (92)",
-                circo: "10ème circonscription",
-                gender: "M",
-                commission: "Affaires culturelles",
-                role: "Président de groupe",
-                photo: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80",
-                interventions: 380,
-                amendmentsProposed: 45,
-                votingAffinity: "95%"
-            },
-            {
-                id: "PA794038",
-                name: "Marine LE PEN",
-                group: "RN",
-                groupLong: "Rassemblement National",
-                dept: "Pas-de-Calais (62)",
-                circo: "11ème circonscription",
-                gender: "F",
-                commission: "Affaires étrangères",
-                role: "Présidente de groupe",
-                photo: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
-                interventions: 290,
-                amendmentsProposed: 110,
-                votingAffinity: "88%"
-            },
-            {
-                id: "PA793398",
-                name: "Mathilde PANOT",
-                group: "LFI",
-                groupLong: "La France Insoumise - NFP",
-                dept: "Val-de-Marne (94)",
-                circo: "10ème circonscription",
-                gender: "F",
-                commission: "Affaires sociales",
-                role: "Présidente de groupe",
-                photo: "https://images.unsplash.com/photo-1567532939604-b6b5b0db2604?w=150&auto=format&fit=crop&q=80",
-                interventions: 345,
-                amendmentsProposed: 230,
-                votingAffinity: "92%"
-            },
-            {
-                id: "PA720692",
-                name: "Boris VALLAUD",
-                group: "SOC",
-                groupLong: "Socialistes et apparentés",
-                dept: "Landes (40)",
-                circo: "3ème circonscription",
-                gender: "M",
-                commission: "Finances",
-                role: "Député",
-                photo: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                interventions: 215,
-                amendmentsProposed: 180,
-                votingAffinity: "91%"
-            },
-            {
-                id: "PA721202",
-                name: "Laurent WAUQUIEZ",
-                group: "DR",
-                groupLong: "Droite Républicaine",
-                dept: "Haute-Loire (43)",
-                circo: "1ère circonscription",
-                gender: "M",
-                commission: "Défense",
-                role: "Président de groupe",
-                photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-                interventions: 180,
-                amendmentsProposed: 85,
-                votingAffinity: "89%"
-            },
-            {
-                id: "PA721880",
-                name: "Cyrielle CHATELAIN",
-                group: "Eco",
-                groupLong: "Écologiste et Social",
-                dept: "Isère (38)",
-                circo: "2ème circonscription",
-                gender: "F",
-                commission: "Développement durable",
-                role: "Présidente de groupe",
-                photo: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                interventions: 195,
-                amendmentsProposed: 140,
-                votingAffinity: "94%"
-            },
-            {
-                id: "PA720728",
-                name: "Marc FESNEAU",
-                group: "DEM",
-                groupLong: "Les Démocrates",
-                dept: "Loir-et-Cher (41)",
-                circo: "1ère circonscription",
-                gender: "M",
-                commission: "Lois",
-                role: "Président de groupe",
-                photo: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
-                interventions: 160,
-                amendmentsProposed: 62,
-                votingAffinity: "96%"
-            }
-        ];
-
-        const BILLS_DATA = [
-            {
-                id: "PJL-2026-04",
-                title: "Projet de loi de finances rectificative pour la transition énergétique",
-                author: "Gouvernement",
-                status: "En cours d'examen en commission",
-                step: 2,
-                date: "28 Octobre 2026",
-                description: "Visant à accélérer le financement des infrastructures de renouvelables et de rénovation thermique pour les ménages modestes."
-            },
-            {
-                id: "PPL-2026-12",
-                title: "Proposition de loi visant à réguler l'intelligence artificielle dans la santé",
-                author: "Cyrielle Chatelain & plusieurs collègues",
-                status: "Adopté en 1ère lecture",
-                step: 3,
-                date: "14 Octobre 2026",
-                description: "Encadrement éthique des données de santé utilisées par les algorithmes prédictifs et garantie du consentement éclairé."
-            },
-            {
-                id: "PJL-2026-01",
-                title: "Projet de loi de programmation militaire et de souveraineté numérique",
-                author: "Gouvernement",
-                status: "Promulgué",
-                step: 5,
-                date: "02 Septembre 2026",
-                description: "Renforcement des capacités de cyberdéfense et modernisation du matériel des armées pour 2026-2030."
-            }
-        ];
-
-        const QUESTIONS_DATA = [
-            {
-                id: "QAG-8942",
-                type: "QAG",
-                author: "Boris Vallaud (SOC)",
-                target: "Ministre du Travail",
-                subject: "Pouvoir d'achat et revalorisation des bas salaires",
-                date: "Hier à 15:30",
-                status: "Répondu"
-            },
-            {
-                id: "QE-14209",
-                type: "QE",
-                author: "Marc Fesneau (DEM)",
-                target: "Ministre de l'Agriculture",
-                subject: "Soutien exceptionnel face aux aléas climatiques dans le maraîchage",
-                date: "24 Octobre 2026",
-                status: "En attente de réponse"
-            },
-            {
-                id: "QAG-8939",
-                type: "QAG",
-                author: "Mathilde Panot (LFI)",
-                target: "Premier Ministre",
-                subject: "Situation des services d'urgence et urgences pédiatriques",
-                date: "21 Octobre 2026",
-                status: "Répondu"
-            }
-        ];
-
-        let selectedQType = 'all';
-
-        /* ==================== APPLICATION INIT & NAVIGATION ==================== */
-        window.onload = function() {
-            initCharts();
-            renderDeputies(DEPUTIES_DATA);
-            renderBills();
-            renderQuestions();
-        };
-
-        function switchTab(tabId) {
-            // Hide all tab content
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            
-            // Show target content
-            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
-
-            // Desktop tab highlights
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('bg-blue-50', 'text-blue-600', 'dark:bg-slate-800', 'dark:text-blue-400');
-                btn.classList.add('text-slate-600', 'dark:text-slate-300');
-            });
-            const activeNav = document.getElementById(`nav-${tabId}`);
-            if (activeNav) {
-                activeNav.classList.add('bg-blue-50', 'text-blue-600', 'dark:bg-slate-800', 'dark:text-blue-400');
-            }
-
-            // Mobile tab highlights
-            document.querySelectorAll('.mobile-tab-btn').forEach(btn => {
-                btn.classList.remove('text-blue-600', 'dark:text-blue-400');
-                btn.classList.add('text-slate-500', 'dark:text-slate-400');
-            });
-        }
-
-        function toggleDarkMode() {
-            document.documentElement.classList.toggle('dark');
-        }
-
-        /* ==================== CHARTS (CHART.JS) ==================== */
-        function initCharts() {
-            // Political Groups Bar Chart
-            const ctxGroups = document.getElementById('chartGroups').getContext('2d');
-            new Chart(ctxGroups, {
-                type: 'bar',
-                data: {
-                    labels: ['RN', 'EPR', 'LFI-NFP', 'SOC', 'DR', 'ECO', 'DEM', 'LIOT', 'Non-Inscrits'],
-                    datasets: [{
-                        label: 'Nombre de Députés',
-                        data: [126, 96, 72, 66, 47, 38, 36, 22, 14],
-                        backgroundColor: [
-                            '#002654', '#0055A5', '#CC2443', '#E4003A', '#0D47A1', 
-                            '#2E7D32', '#FF6F00', '#78909C', '#9E9E9E'
-                        ],
-                        borderRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: 'rgba(160, 174, 192, 0.2)' } },
-                        x: { grid: { display: false } }
-                    }
-                }
-            });
-
-            // Gender Parity Pie Chart
-            const ctxGender = document.getElementById('chartGender').getContext('2d');
-            new Chart(ctxGender, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Hommes (62.7%)', 'Femmes (37.3%)'],
-                    datasets: [{
-                        data: [362, 215],
-                        backgroundColor: ['#3B82F6', '#EC4899'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'bottom' }
-                    },
-                    cutout: '70%'
-                }
-            });
-        }
-
-        /* ==================== DEPUTIES SECTION LOGIC ==================== */
-        function renderDeputies(data) {
-            const grid = document.getElementById('deputiesGrid');
-            grid.innerHTML = '';
-
-            if (data.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center py-8 text-slate-500">Aucun député trouvé.</div>`;
-                return;
-            }
-
-            data.forEach(deputy => {
-                const card = document.createElement('div');
-                card.className = "bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700/80 p-4 shadow-sm hover:shadow-md transition flex flex-col justify-between cursor-pointer";
-                card.onclick = () => openDeputyModal(deputy.id);
-
-                card.innerHTML = `
-                    <div class="flex items-start space-x-3">
-                        <img src="${deputy.photo}" alt="${deputy.name}" class="w-12 h-12 rounded-full object-cover border border-slate-200">
-                        <div>
-                            <h4 class="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">${deputy.name}</h4>
-                            <span class="inline-block px-2 py-0.5 mt-1 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                                ${deputy.group}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/60 text-xs text-slate-500 dark:text-slate-400 space-y-1">
-                        <p><i class="fa-solid fa-location-dot mr-1"></i> ${deputy.dept}</p>
-                        <p><i class="fa-solid fa-building-columns mr-1"></i> ${deputy.commission}</p>
-                    </div>
-                    <div class="mt-3 flex justify-between items-center text-xs pt-2 font-medium">
-                        <span class="text-blue-600 dark:text-blue-400">${deputy.interventions} interventions</span>
-                        <i class="fa-solid fa-chevron-right text-slate-400 text-xs"></i>
-                    </div>
-                `;
-                grid.appendChild(card);
-            });
-        }
-
-        function filterDeputies() {
-            const searchVal = document.getElementById('deputySearch').value.toLowerCase();
-            const groupVal = document.getElementById('filterGroup').value;
-            const commVal = document.getElementById('filterCommittee').value;
-            const sortVal = document.getElementById('filterSort').value;
-
-            let filtered = DEPUTIES_DATA.filter(d => {
-                const matchesSearch = d.name.toLowerCase().includes(searchVal) || d.dept.toLowerCase().includes(searchVal);
-                const matchesGroup = groupVal === '' || d.group === groupVal;
-                const matchesComm = commVal === '' || d.commission.includes(commVal);
-                return matchesSearch && matchesGroup && matchesComm;
-            });
-
-            if (sortVal === 'name') {
-                filtered.sort((a,b) => a.name.localeCompare(b.name));
-            } else if (sortVal === 'activity') {
-                filtered.sort((a,b) => b.interventions - a.interventions);
-            }
-
-            renderDeputies(filtered);
-        }
-
-        function openDeputyModal(id) {
-            const deputy = DEPUTIES_DATA.find(d => d.id === id);
-            if (!deputy) return;
-
-            const modalContent = document.getElementById('modalContent');
-            modalContent.innerHTML = `
-                <div class="flex items-center space-x-4">
-                    <img src="${deputy.photo}" class="w-16 h-16 rounded-full object-cover border-2 border-blue-600">
-                    <div>
-                        <h3 class="text-xl font-bold text-slate-900 dark:text-white">${deputy.name}</h3>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">${deputy.role} • ${deputy.groupLong}</p>
-                        <span class="inline-block mt-1 text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300">ID: ${deputy.id}</span>
-                    </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="card space-y-3">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title"><i class="fa-solid fa-check-to-slot text-blue-600"></i>Derniers scrutins</h2>
+                    <a href="#/scrutins" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Tous les scrutins →</a>
                 </div>
-
-                <div class="grid grid-cols-2 gap-3 mt-4 text-xs">
-                    <div class="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <span class="text-slate-500 dark:text-slate-400 block">Circonscription</span>
-                        <span class="font-bold text-slate-900 dark:text-white">${deputy.dept}</span>
-                    </div>
-                    <div class="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <span class="text-slate-500 dark:text-slate-400 block">Commission</span>
-                        <span class="font-bold text-slate-900 dark:text-white">${deputy.commission}</span>
-                    </div>
-                    <div class="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <span class="text-slate-500 dark:text-slate-400 block">Amendements Rédigés</span>
-                        <span class="font-bold text-slate-900 dark:text-white">${deputy.amendmentsProposed}</span>
-                    </div>
-                    <div class="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <span class="text-slate-500 dark:text-slate-400 block">Loyauté Groupe</span>
-                        <span class="font-bold text-emerald-600 dark:text-emerald-400">${deputy.votingAffinity}</span>
-                    </div>
+                <div id="dashScrutins" class="space-y-2"></div>
+            </div>
+            <div class="card space-y-3">
+                <div class="flex items-center justify-between">
+                    <h2 class="card-title"><i class="fa-solid fa-file-contract text-emerald-600"></i>Textes récemment actifs</h2>
+                    <a href="#/lois" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Tous les textes →</a>
                 </div>
+                <div id="dashDossiers" class="space-y-2"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2 class="card-title mb-4"><i class="fa-solid fa-building-columns text-amber-600"></i>Ministères les plus interrogés</h2>
+            <div class="h-72 relative"><canvas id="chartMinisteres"></canvas></div>
+        </div>
+    </section>
 
-                <div class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-                    <a href="https://data.assemblee-nationale.fr/acteurs/PA795828" target="_blank" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition">
-                        Fiche API Complète <i class="fa-solid fa-external-link ml-1"></i>
-                    </a>
+    <!-- ==================== DÉPUTÉS ==================== -->
+    <section id="tab-deputes" class="tab-content hidden space-y-6">
+        <div class="card space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900 dark:text-white">Annuaire des députés</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="deputesCount"></p>
                 </div>
-            `;
+                <div class="relative w-full md:w-80">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input type="search" id="deputySearch" placeholder="Nom, département, n° de département…" class="input pl-9">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
+                <label class="filter-label">Groupe<select id="filterGroup" class="input text-xs"><option value="">Tous les groupes</option></select></label>
+                <label class="filter-label">Commission permanente<select id="filterCommission" class="input text-xs"><option value="">Toutes</option></select></label>
+                <label class="filter-label">Sexe<select id="filterSexe" class="input text-xs"><option value="">Tous</option><option value="F">Femmes</option><option value="H">Hommes</option></select></label>
+                <label class="filter-label">Trier par<select id="filterSort" class="input text-xs">
+                    <option value="nom">Nom (A-Z)</option>
+                    <option value="dept">Département</option>
+                    <option value="participation">Participation aux scrutins</option>
+                    <option value="questions">Nombre de questions</option>
+                </select></label>
+            </div>
+        </div>
+        <div id="deputiesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+        <div class="text-center"><button id="deputiesMore" class="btn-secondary hidden">Afficher plus</button></div>
+    </section>
 
-            document.getElementById('deputyModal').classList.remove('hidden');
-        }
+    <!-- ==================== LOIS ==================== -->
+    <section id="tab-lois" class="tab-content hidden space-y-6">
+        <div class="card space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900 dark:text-white">Projets et propositions de loi</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="loisCount"></p>
+                </div>
+                <div class="relative w-full md:w-80">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input type="search" id="loiSearch" placeholder="Titre, auteur…" class="input pl-9">
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs" id="loiCatFilter">
+                <button data-cat="" class="chip chip-active">Tous</button>
+                <button data-cat="PJL" class="chip">Projets de loi (Gouvernement)</button>
+                <button data-cat="PPL" class="chip">Propositions de loi (parlementaires)</button>
+                <button data-cat="AUTRE" class="chip hidden">Autres procédures</button>
+                <span class="mx-1 border-l border-slate-300 dark:border-slate-600"></span>
+                <button data-status="" class="chip chip-active">Tous statuts</button>
+                <button data-status="cours" class="chip">En cours</button>
+                <button data-status="prom" class="chip">Promulguées</button>
+            </div>
+            <div class="grid grid-cols-5 gap-1 text-center text-[10px] sm:text-xs pt-2">
+                <div class="step-legend">1. Dépôt</div><div class="step-legend">2. Commission</div><div class="step-legend">3. Séance</div>
+                <div class="step-legend">4. Navette / Sénat</div><div class="step-legend">5. Promulgation</div>
+            </div>
+        </div>
+        <div id="billsList" class="space-y-3"></div>
+        <div class="text-center"><button id="billsMore" class="btn-secondary hidden">Afficher plus</button></div>
+    </section>
 
-        function closeModal() {
-            document.getElementById('deputyModal').classList.add('hidden');
-        }
+    <!-- ==================== QUESTIONS ==================== -->
+    <section id="tab-questions" class="tab-content hidden space-y-6">
+        <div class="card space-y-4">
+            <div class="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900 dark:text-white">Questions au Gouvernement</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="questionsCount"></p>
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs" id="qTypeFilter">
+                    <button data-type="" class="chip chip-active">Toutes</button>
+                    <button data-type="QG" class="chip">Au Gouvernement (QAG)</button>
+                    <button data-type="QE" class="chip">Écrites</button>
+                    <button data-type="QOSD" class="chip">Orales sans débat</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <input type="search" id="questionSearch" placeholder="Mot-clé, député, ministère, rubrique…" class="input md:col-span-3">
+                <select id="qStatus" class="input text-xs">
+                    <option value="">Tous statuts</option><option value="1">Répondues</option><option value="0">Sans réponse</option>
+                </select>
+            </div>
+        </div>
+        <div id="questionsContainer" class="space-y-3"></div>
+        <div class="text-center"><button id="questionsMore" class="btn-secondary hidden">Afficher plus</button></div>
+    </section>
 
-        /* ==================== BILLS SECTION LOGIC ==================== */
-        function renderBills() {
-            const list = document.getElementById('billsList');
-            list.innerHTML = '';
+    <!-- ==================== SCRUTINS ==================== -->
+    <section id="tab-scrutins" class="tab-content hidden space-y-6">
+        <div class="card space-y-3">
+            <div class="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900 dark:text-white">Scrutins publics</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" id="scrutinsCount"></p>
+                </div>
+                <input type="search" id="scrutinSearch" placeholder="Objet du vote…" class="input md:w-80">
+            </div>
+        </div>
+        <div id="scrutinsList" class="space-y-3"></div>
+        <div class="text-center"><button id="scrutinsMore" class="btn-secondary hidden">Afficher plus</button></div>
+    </section>
 
-            BILLS_DATA.forEach(bill => {
-                const item = document.createElement('div');
-                item.className = "bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm space-y-3";
-                
-                // Progress bar step calculation
-                const progressPct = (bill.step / 5) * 100;
-
-                item.innerHTML = `
-                    <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                        <span class="text-xs font-mono font-semibold px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 w-fit">
-                            ${bill.id}
-                        </span>
-                        <span class="text-xs text-slate-500"><i class="fa-solid fa-calendar mr-1"></i> ${bill.date}</span>
+    <!-- ==================== DONNÉES / API ==================== -->
+    <section id="tab-donnees" class="tab-content hidden space-y-6">
+        <div class="card space-y-4">
+            <div>
+                <h2 class="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2"><i class="fa-solid fa-terminal text-blue-600"></i>Données JSON publiques</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Fichiers générés par GitHub Actions depuis l'Open Data officiel. Ils sont servis statiquement et réutilisables (CORS ouvert sur GitHub Pages).
+                </p>
+            </div>
+            <div id="metaInfo" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="space-y-3">
+                    <label class="filter-label">Fichier
+                        <select id="apiEndpoint" class="input text-xs font-mono"></select>
+                    </label>
+                    <button id="apiRun" class="btn-primary w-full"><i class="fa-solid fa-play"></i>Charger</button>
+                    <a id="apiRaw" href="#" target="_blank" class="btn-secondary w-full"><i class="fa-solid fa-up-right-from-square"></i>Ouvrir le JSON brut</a>
+                </div>
+                <div class="lg:col-span-2 space-y-0">
+                    <div class="flex justify-between items-center bg-slate-900 text-slate-300 px-4 py-2 rounded-t-lg text-xs font-mono">
+                        <span id="apiStatus">GET —</span>
+                        <button id="apiCopy" class="hover:text-white"><i class="fa-solid fa-copy"></i> Copier</button>
                     </div>
-                    
-                    <h3 class="text-base font-bold text-slate-900 dark:text-white">${bill.title}</h3>
-                    <p class="text-xs text-slate-600 dark:text-slate-300">${bill.description}</p>
-                    
-                    <div class="pt-2 space-y-1">
-                        <div class="flex justify-between text-xs font-medium">
-                            <span class="text-blue-600 dark:text-blue-400">${bill.status}</span>
-                            <span class="text-slate-500">Étape ${bill.step}/5</span>
-                        </div>
-                        <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
-                            <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${progressPct}%"></div>
-                        </div>
-                    </div>
-                `;
-                list.appendChild(item);
-            });
-        }
+                    <pre id="apiOutput" class="bg-slate-950 text-emerald-400 p-4 rounded-b-lg font-mono text-xs overflow-auto h-96 custom-scrollbar leading-relaxed">// Choisissez un fichier puis « Charger »</pre>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
 
-        /* ==================== QUESTIONS SECTION LOGIC ==================== */
-        function filterQuestionsType(type) {
-            selectedQType = type;
-            document.querySelectorAll('.qtype-btn').forEach(btn => {
-                btn.classList.remove('bg-blue-600', 'text-white');
-                btn.classList.add('bg-slate-100', 'dark:bg-slate-700', 'text-slate-700', 'dark:text-slate-200');
-            });
-            document.getElementById(`qtype-${type}`).classList.add('bg-blue-600', 'text-white');
-            document.getElementById(`qtype-${type}`).classList.remove('bg-slate-100', 'dark:bg-slate-700', 'text-slate-700', 'dark:text-slate-200');
-            renderQuestions();
-        }
+<!-- Fenêtre de détail (député, dossier, question) -->
+<div id="detailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden" role="dialog" aria-modal="true">
+    <div class="h-full overflow-y-auto p-2 sm:p-6" id="detailBackdrop">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl max-w-4xl mx-auto shadow-2xl border border-slate-200 dark:border-slate-700 relative">
+            <button id="detailClose" class="absolute top-3 right-3 text-slate-400 hover:text-slate-700 dark:hover:text-white p-2 text-lg" aria-label="Fermer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div id="detailContent" class="p-5 sm:p-7"></div>
+        </div>
+    </div>
+</div>
 
-        function renderQuestions() {
-            const container = document.getElementById('questionsContainer');
-            const searchVal = document.getElementById('questionSearch').value.toLowerCase();
-            container.innerHTML = '';
+<footer class="mt-auto border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-xs text-slate-500 dark:text-slate-400">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+        <p>Projet indépendant, non affilié à l'Assemblée nationale. Données : Assemblée nationale, <a class="underline" href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener">Licence Ouverte 2.0</a>.</p>
+        <div class="flex items-center gap-4">
+            <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hover:underline">Portail Open Data</a>
+            <a href="https://github.com/mr-robotpy/assemblee-nationale-explorer" target="_blank" rel="noopener" class="hover:underline"><i class="fa-brands fa-github"></i> Code source</a>
+        </div>
+    </div>
+</footer>
 
-            const filtered = QUESTIONS_DATA.filter(q => {
-                const matchesType = selectedQType === 'all' || q.type === selectedQType;
-                const matchesSearch = q.subject.toLowerCase().includes(searchVal) || q.author.toLowerCase().includes(searchVal);
-                return matchesType && matchesSearch;
-            });
-
-            if(filtered.length === 0) {
-                container.innerHTML = `<div class="p-6 text-center text-slate-500 text-xs">Aucune question ne correspond à votre recherche.</div>`;
-                return;
-            }
-
-            filtered.forEach(q => {
-                const card = document.createElement('div');
-                card.className = "bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-3";
-                
-                card.innerHTML = `
-                    <div class="space-y-1">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[10px] font-bold px-2 py-0.5 rounded ${q.type === 'QAG' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'}">
-                                ${q.type}
-                            </span>
-                            <span class="text-xs text-slate-400 font-mono">${q.id}</span>
-                            <span class="text-xs text-slate-500">• ${q.date}</span>
-                        </div>
-                        <h4 class="font-bold text-sm text-slate-900 dark:text-white">${q.subject}</h4>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">
-                            Par <span class="font-semibold text-slate-700 dark:text-slate-300">${q.author}</span> adressée à <span class="font-semibold text-slate-700 dark:text-slate-300">${q.target}</span>
-                        </p>
-                    </div>
-                    <div>
-                        <span class="text-xs px-2.5 py-1 rounded-full font-medium ${q.status === 'Répondu' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}">
-                            ${q.status}
-                        </span>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        /* ==================== API CONSOLE LOGIC ==================== */
-        function executeApiQuery() {
-            const endpoint = document.getElementById('apiEndpoint').value;
-            const consoleOutput = document.getElementById('apiConsoleOutput');
-
-            consoleOutput.textContent = "// Envoi de la requête GET vers https://data.assemblee-nationale.fr/static/openData/repository/17/json" + endpoint + " ...";
-
-            setTimeout(() => {
-                let mockResponse = {};
-                if(endpoint.includes('actor')) {
-                    mockResponse = {
-                        "acteur": {
-                            "@xmlns": "http://schemas.assemblee-nationale.fr/referentiel",
-                            "uid": { "#text": "PA795828" },
-                            "etatCivil": {
-                                "ident": { "civ": "Mme", "prenom": "Yaël", "nom": "BRAUN-PIVET" },
-                                "infoNaissance": { "dateNass": "1970-12-07", "villeNaissance": "Nancy" }
-                            },
-                            "mandats": {
-                                "mandat": [
-                                    { "typeOrgane": "ASSEMBLEE", "dateDebut": "2024-07-18", "qualite": "Présidente" }
-                                ]
-                            }
-                        }
-                    };
-                } else if(endpoint.includes('scrutins')) {
-                    mockResponse = {
-                        "scrutin": {
-                            "uid": "VT2024_089",
-                            "titre": "Scrutin public sur l'ensemble du projet de loi de finances",
-                            "sort": { "code": "adopte" },
-                            "ventilationVotes": {
-                                "pour": 312,
-                                "contre": 198,
-                                "abstentions": 45
-                            }
-                        }
-                    };
-                } else {
-                    mockResponse = {
-                        "dossierParlementaire": {
-                            "uid": "DLR5L16N458",
-                            "titre": "Loi relative au développement de l'apprentissage",
-                            "etapeCourante": "EXAMEN_COMMISSION"
-                        }
-                    };
-                }
-
-                consoleOutput.textContent = JSON.stringify(mockResponse, null, 2);
-            }, 400);
-        }
-
-        function copyApiOutput() {
-            const output = document.getElementById('apiConsoleOutput').textContent;
-            navigator.clipboard.writeText(output);
-            alert("Code JSON copié dans le presse-papier !");
-        }
-    </script>
+<script src="assets/app.js"></script>
 </body>
 </html>

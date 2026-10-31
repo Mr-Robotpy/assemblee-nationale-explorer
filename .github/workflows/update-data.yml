@@ -1,0 +1,91 @@
+name: Mise à jour des données et déploiement
+
+on:
+  schedule:
+    # Tous les jours à 04:23 UTC (≈ 05:23 / 06:23 à Paris). Les archives AN sont régénérées dans la nuit.
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      max_qe:
+        description: "Nombre de questions écrites publiées (0 = toutes)"
+        required: false
+        default: "3000"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "data/**"
+      - "README.md"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests du pipeline (hors ligne)
+        run: python -m unittest discover -s tests -v
+
+      - name: Génération des JSON depuis l'Open Data AN
+        # En cas d'indisponibilité du serveur AN, on redéploie les données précédentes.
+        continue-on-error: true
+        env:
+          MAX_QE: ${{ github.event.inputs.max_qe || '3000' }}
+        run: python scripts/build_data.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Compilation CSS (Tailwind)
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build:css
+
+      - name: Commit des données si elles ont changé
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data assets/app.css
+          if git diff --cached --quiet; then
+            echo "Aucun changement."
+          else
+            git commit -m "data: mise à jour automatique $(date -u +'%Y-%m-%d')"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - name: Préparation du site
+        run: |
+          mkdir -p _site
+          cp -r index.html assets data _site/
+          touch _site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
