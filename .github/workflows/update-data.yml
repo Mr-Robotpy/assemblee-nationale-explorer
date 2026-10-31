@@ -72,7 +72,7 @@ jobs:
 
       - name: Préparation du site
         run: |
-          mkdir -p _site
+          mkdir -p _site data
           cp -r index.html assets data _site/
           touch _site/.nojekyll
 
