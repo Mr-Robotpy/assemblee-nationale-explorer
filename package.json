@@ -1,0 +1,12 @@
+{
+  "name": "assemblee-nationale-explorer",
+  "private": true,
+  "description": "Front statique : compilation de la feuille de style Tailwind",
+  "scripts": {
+    "build:css": "tailwindcss -i assets/tailwind.src.css -o assets/app.css --minify",
+    "watch:css": "tailwindcss -i assets/tailwind.src.css -o assets/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}
