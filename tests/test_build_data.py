@@ -1,6 +1,8 @@
 """Tests hors ligne du pipeline : fixtures = extraits réels de l'Open Data AN (XVIIe législature)."""
+import http.server
 import json
 import sys
+import threading
 import tempfile
 import unittest
 import zipfile
@@ -110,6 +112,84 @@ class SanitizerTest(unittest.TestCase):
 
     def test_unbalanced(self):
         self.assertEqual(bd.sanitize_html("</p>texte<b>gras"), "texte<b>gras</b>")
+
+
+class _FlakyHandler(http.server.BaseHTTPRequestHandler):
+    """Sert PAYLOAD en coupant la connexion après CUT octets, comme le serveur de l'AN ; gère Range."""
+    PAYLOAD = bytes(range(256)) * 4000  # ~1 Mo
+    CUT = 300_000
+    supports_range = True
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        start = 0
+        rng = self.headers.get("Range")
+        if rng and self.supports_range:
+            start = int(rng.split("=")[1].rstrip("-"))
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{len(self.PAYLOAD) - 1}/{len(self.PAYLOAD)}")
+        else:
+            self.send_response(200)
+        body = self.PAYLOAD[start:]
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body[: self.CUT])  # coupure : moins d'octets que annoncé
+        self.wfile.flush()
+        self.close_connection = True
+
+
+class DownloadTest(unittest.TestCase):
+    def setUp(self):
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FlakyHandler)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.srv.server_port}/f.zip"
+        self.tmp = tempfile.TemporaryDirectory()
+        self._sleep, bd.time.sleep = bd.time.sleep, lambda s: None
+
+    def tearDown(self):
+        bd.time.sleep = self._sleep
+        _FlakyHandler.supports_range = True
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.tmp.cleanup()
+
+    def test_reprise_apres_coupures(self):
+        target = Path(self.tmp.name) / "f.zip"
+        bd.download_file(self.url, target)
+        self.assertEqual(target.read_bytes(), _FlakyHandler.PAYLOAD)
+        self.assertFalse(target.with_name("f.zip.part").exists())
+
+    def test_echec_si_reprise_impossible(self):
+        _FlakyHandler.supports_range = False
+        with self.assertRaises(RuntimeError):
+            bd.download_file(self.url, Path(self.tmp.name) / "f.zip", attempts=3)
+
+
+class SourceIndisponibleTest(unittest.TestCase):
+    """Une archive de questions manquante ne doit effacer ni les questions ni les stats de la veille."""
+
+    def test_questions_de_la_veille_conservees(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            zips = tmp / "zips"
+            zips.mkdir()
+            name = lambda key: bd.SOURCES[key].rsplit("/", 1)[1]  # noqa: E731
+            for key, fix in (("amo10", "amo10"), ("dossiers", "dossiers"), ("scrutins", "scrutins"),
+                             ("questions_ecrites", "qe"), ("questions_gouvernement", "qg")):
+                make_zip(FIX / fix, zips / name(key))
+            out = tmp / "data"
+            self.assertEqual(bd.main(["--source-dir", str(zips), "--out", str(out), "--no-fulltext"]), 0)
+            avant = json.loads((out / "questions.json").read_text(encoding="utf-8"))
+            (zips / name("questions_ecrites")).unlink()
+            bd.main(["--source-dir", str(zips), "--out", str(out), "--no-fulltext"])
+            self.assertEqual(json.loads((out / "questions.json").read_text(encoding="utf-8")), avant)
+            self.assertTrue((out / "questions" / "QANR5L17QE1234.json").exists())
+            fiche = json.loads((out / "deputes" / "PA841495.json").read_text(encoding="utf-8"))
+            self.assertEqual(fiche["questions"]["total"], 1)
+            meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+            self.assertIn("questions", meta["echecs"])
 
 
 if __name__ == "__main__":
