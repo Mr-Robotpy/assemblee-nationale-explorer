@@ -1,23 +1,22 @@
 name: Mise à jour des données et déploiement
 
+# Les JSON générés vivent sur la branche `data` (un seul commit, réécrit à chaque passage) :
+#  - `main` ne contient que le code : pas de commit quotidien, pas de conflit avec vos pushes ;
+#  - si le serveur de l'AN est indisponible, on redéploie les données de la veille ;
+#  - les textes intégraux déjà récupérés sont conservés d'un passage à l'autre.
+
 on:
   schedule:
     # Tous les jours à 04:23 UTC (≈ 05:23 / 06:23 à Paris). Les archives AN sont régénérées dans la nuit.
     - cron: "23 4 * * *"
   workflow_dispatch:
-    inputs:
-      max_qe:
-        description: "Nombre de questions écrites publiées (0 = toutes)"
-        required: false
-        default: "3000"
   push:
     branches: [main]
     paths-ignore:
-      - "data/**"
       - "README.md"
 
 permissions:
-  contents: write
+  contents: write   # écriture de la branche `data`
   pages: write
   id-token: write
 
@@ -39,12 +38,35 @@ jobs:
       - name: Tests du pipeline (hors ligne)
         run: python -m unittest discover -s tests -v
 
+      - name: Restauration des données précédentes (branche data)
+        run: |
+          mkdir -p data
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth=1 origin data
+            git archive FETCH_HEAD | tar -x -C data
+            echo "Données précédentes restaurées : $(find data -type f | wc -l) fichiers"
+          else
+            echo "Pas encore de branche data (premier passage)."
+          fi
+
       - name: Génération des JSON depuis l'Open Data AN
+        id: build
         # En cas d'indisponibilité du serveur AN, on redéploie les données précédentes.
         continue-on-error: true
-        env:
-          MAX_QE: ${{ github.event.inputs.max_qe || '3000' }}
         run: python scripts/build_data.py
+
+      - name: Publication sur la branche data
+        if: steps.build.outcome == 'success'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -rf /tmp/data-branch && cp -r data /tmp/data-branch && cd /tmp/data-branch
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "data: Open Data AN du $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push -q --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data:data
 
       - uses: actions/setup-node@v4
         with:
@@ -55,24 +77,11 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build:css
 
-      - name: Commit des données si elles ont changé
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data assets/app.css
-          if git diff --cached --quiet; then
-            echo "Aucun changement."
-          else
-            git commit -m "data: mise à jour automatique $(date -u +'%Y-%m-%d')"
-            git pull --rebase origin "${GITHUB_REF_NAME}"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-
       - uses: actions/configure-pages@v5
 
       - name: Préparation du site
         run: |
-          mkdir -p _site data
+          mkdir -p _site
           cp -r index.html assets data _site/
           touch _site/.nojekyll
 

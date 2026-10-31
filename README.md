@@ -5,13 +5,13 @@ propositions de loi (avec texte intégral), questions écrites et au Gouvernemen
 
 Site 100 % statique hébergé sur GitHub Pages. Les données sont reconstruites **chaque jour** par GitHub Actions à
 partir des archives officielles de [data.assemblee-nationale.fr](https://data.assemblee-nationale.fr), puis
-enregistrées en JSON dans `data/`.
+publiées en JSON sur la branche [`data`](../../tree/data) et servies sous `/data/` par GitHub Pages.
 
 ## Architecture
 
 ```
 Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json ──► index.html + assets/app.js
-        ▲                        (Python, stdlib)        (commités)        (GitHub Pages)
+        ▲                        (Python, stdlib)     (branche data)       (GitHub Pages)
         └──────────── GitHub Actions, tous les jours à 04:23 UTC ────────────┘
 ```
 
@@ -29,13 +29,29 @@ Volumes publiés (modifiables via variables d'environnement ou options CLI) : 40
 3 000 questions écrites, 1 500 questions au Gouvernement, 800 questions orales. Les statistiques (participation,
 nombre de questions…) sont calculées sur **toute** la législature.
 
+### Pourquoi une branche `data` séparée ?
+
+- `main` ne contient que le code : pas de commit automatique quotidien, pas de conflit avec vos propres pushes,
+  compatible avec une protection de branche sur `main`.
+- La branche `data` est réécrite en un seul commit à chaque passage : sa taille reste constante.
+- À chaque passage, les données précédentes sont restaurées avant la génération : si une source de l'AN est
+  indisponible, sa section garde les données de la veille, et les textes intégraux déjà récupérés ne sont
+  pas retéléchargés.
+- Les JSON restent consultables dans le dépôt (branche `data`) et sur le site (`/data/…`).
+
+### Pourquoi plafonner le volume ?
+
+L'index des questions est chargé à la première ouverture de l'onglet Questions ; avec toutes les questions écrites
+de la législature (plus de 20 000), il pèserait plusieurs Mo (estimation) et rendrait l'onglet lent sur mobile. Les plafonds
+ne concernent que l'affichage : les compteurs et statistiques couvrent toute la législature.
+
 ## Mise en place sur GitHub
 
 1. **Settings → Pages → Build and deployment → Source : « GitHub Actions »**.
-2. **Settings → Actions → General → Workflow permissions : « Read and write permissions »** (pour commiter `data/`).
+2. **Settings → Actions → General → Workflow permissions : « Read and write permissions »** (pour écrire la branche `data`).
 3. Onglet **Actions → « Mise à jour des données et déploiement » → Run workflow** pour la première génération.
 
-Ensuite tout est automatique : exécution quotidienne, commit des JSON seulement s'ils ont changé, redéploiement.
+Ensuite tout est automatique : exécution quotidienne, mise à jour de la branche `data`, redéploiement.
 Si le serveur de l'AN est indisponible, le site est redéployé avec les données de la veille et la section en
 échec est signalée dans `meta.json` (bandeau visible sur le site).
 

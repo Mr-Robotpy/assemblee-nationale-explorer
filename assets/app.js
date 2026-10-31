@@ -93,6 +93,7 @@ function showTab(tab) {
     document.querySelectorAll('.tab-content').forEach((el) => el.classList.toggle('hidden', el.id !== `tab-${tab}`));
     document.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab === 'donnees') { try { renderMeta(); } catch (e) { console.error(e); } }
+    if (tab === 'questions' && state.ready) loadQuestions();
 }
 
 /* ---------------------------------------------------------------- démarrage */
@@ -127,18 +128,18 @@ async function init() {
     }
 
     const results = await Promise.allSettled([
-        getJSON('deputes.json'), getJSON('groupes.json'), getJSON('dossiers.json'), getJSON('questions.json'), getJSON('scrutins.json'),
+        getJSON('deputes.json'), getJSON('groupes.json'), getJSON('dossiers.json'), getJSON('scrutins.json'),
     ]);
-    const [dep, grp, dos, que, scr] = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
-    Object.assign(state, { deputes: dep, groupes: grp, dossiers: dos, questions: que, scrutins: scr });
+    const [dep, grp, dos, scr] = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
+    Object.assign(state, { deputes: dep, groupes: grp, dossiers: dos, scrutins: scr, ready: true });
 
     fillFilterOptions();
     renderDashboard();
     renderDeputies();
     renderBills();
-    renderQuestions();
     renderScrutins();
     renderMeta();
+    if (lastTab === 'questions') loadQuestions();
 }
 
 function showGlobalError(html) {
@@ -372,6 +373,18 @@ function renderBills() {
 }
 
 /* ---------------------------------------------------------------- questions */
+// Index le plus lourd (plusieurs Mo) : chargé seulement à la première visite de l'onglet.
+let questionsLoading = null;
+function loadQuestions() {
+    if (questionsLoading) return questionsLoading;
+    $('#questionsContainer').innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton h-20 w-full"></div>').join('');
+    questionsLoading = getJSON('questions.json')
+        .then((q) => { state.questions = q; })
+        .catch((e) => { questionsLoading = null; showGlobalError(`Questions indisponibles (${esc(e.message)}).`); })
+        .finally(() => { renderQuestions(); renderMeta(); });
+    return questionsLoading;
+}
+
 function filteredQuestions() {
     const q = norm($('#questionSearch').value.trim());
     const st = $('#qStatus').value;
