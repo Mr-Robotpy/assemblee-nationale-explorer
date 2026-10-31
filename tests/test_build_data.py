@@ -105,6 +105,17 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(meta["sections"]["deputes"]["total"], 6)
 
 
+class ProjetsDeLoiTest(unittest.TestCase):
+    def test_projets_de_loi_toujours_publies(self):
+        """Plafond à 1 : le projet de loi est gardé même si une autre procédure est plus récente."""
+        with tempfile.TemporaryDirectory() as t:
+            z = Path(t) / "dossiers.zip"
+            make_zip(FIX / "dossiers", z)
+            index, _, _ = bd.build_dossiers(z, bd.Referentiel(), 1, {"PJL", "PPL", "AUTRE"})
+            self.assertEqual([d["uid"] for d in index], ["DLR5L17N50173"])
+            self.assertEqual(index[0]["initiateurs"], ["Gouvernement"])
+
+
 class SanitizerTest(unittest.TestCase):
     def test_strips_attributes_and_dangerous_tags(self):
         out = bd.sanitize_html('<p style="x" onclick="evil()">Bonjour <a href="javascript:x">lien</a></p><style>p{}</style><iframe src=x></iframe>')
