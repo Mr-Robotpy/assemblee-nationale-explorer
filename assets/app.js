@@ -19,6 +19,8 @@ const state = {
     charts: {},
 };
 const cache = new Map();
+let markReady;
+const dataReady = new Promise((r) => { markReady = r; });
 
 /* ---------------------------------------------------------------- utilitaires */
 const $ = (sel) => document.querySelector(sel);
@@ -32,6 +34,7 @@ function fmtDate(d, opts = { day: 'numeric', month: 'long', year: 'numeric' }) {
 }
 const fmtShort = (d) => fmtDate(d, { day: 'numeric', month: 'short', year: 'numeric' });
 const pct = (v) => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')} %`);
+const PARTICIPATION_INFO = "Part des scrutins publics auxquels le député a pris part (y compris par délégation) depuis le début de son mandat. Beaucoup de scrutins se tiennent en séance avec peu de députés présents : une participation faible ne signifie pas une absence à l'Assemblée (travaux en commission, circonscription…).";
 const debounce = (fn, ms = 200) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 async function getJSON(path) {
@@ -115,6 +118,7 @@ async function init() {
         meta = await getJSON('meta.json');
     } catch (e) {
         showGlobalError(`Les données n'ont pas encore été générées (${esc(e.message)}). Lancez le workflow « Mise à jour des données » dans l'onglet Actions du dépôt, ou en local : <code>python scripts/build_data.py</code>.`);
+        markReady();
         return;
     }
     state.meta = meta;
@@ -132,6 +136,7 @@ async function init() {
     ]);
     const [dep, grp, dos, scr] = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
     Object.assign(state, { deputes: dep, groupes: grp, dossiers: dos, scrutins: scr, ready: true });
+    markReady();
 
     fillFilterOptions();
     renderDashboard();
@@ -317,7 +322,7 @@ function renderDeputies() {
                 <p class="truncate"><i class="fa-solid fa-building-columns w-4"></i>${esc(d.commission ? d.commission.replace(/^Commission (des |de la |de l'|du )?/i, '') : '—')}</p>
             </div>
             <div class="mt-2 flex justify-between items-center text-xs font-medium">
-                <span class="text-blue-600 dark:text-blue-400">${d.participation != null ? `Participation ${pct(d.participation)}` : ''}</span>
+                <span class="text-blue-600 dark:text-blue-400">${d.participation != null ? `<span title="${esc(PARTICIPATION_INFO)}">Participation ${pct(d.participation)} <i class="fa-regular fa-circle-question text-slate-400"></i></span>` : ''}</span>
                 <span class="text-slate-500">${d.questions != null ? `${fmtNum(d.questions)} question(s)` : ''}</span>
             </div>
         </a>`).join('');
@@ -349,7 +354,7 @@ function statusBadge(statut, etape) {
 
 function renderBills() {
     const list = filteredBills();
-    $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés — les plus récemment actifs de la législature`;
+    $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés — tous les projets de loi, et les propositions les plus récemment actives`;
     const el = $('#billsList');
     if (!list.length) { el.innerHTML = emptyState('Aucun texte ne correspond.'); moreButton('#billsMore', 0, 0); return; }
     el.innerHTML = list.slice(0, state.shown.lois).map((d) => `
@@ -466,7 +471,8 @@ async function openDetail(kind, id) {
     document.body.style.overflow = 'hidden';
     try {
         const file = { depute: `deputes/${id}.json`, dossier: `dossiers/${id}.json`, question: `questions/${id}.json` }[kind];
-        const data = await getJSON(file);
+        // Couleurs des groupes et liens vers les députés : attendre les listes (2 s max).
+        const [data] = await Promise.all([getJSON(file), Promise.race([dataReady, new Promise((r) => setTimeout(r, 2000))])]);
         if (token !== detailToken) return;
         content.innerHTML = { depute: renderDeputeDetail, dossier: renderDossierDetail, question: renderQuestionDetail }[kind](data);
         $('#detailBackdrop').scrollTop = 0;
@@ -503,11 +509,12 @@ function renderDeputeDetail(d) {
         </div>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 text-xs">
-        <div class="stat"><span class="stat-label">Participation aux scrutins</span><span class="stat-value text-lg">${pct(sc.participation)}</span><span class="block text-slate-500">${fmtNum(sc.votes)} votes / ${fmtNum(sc.eligibles)}</span></div>
+        <div class="stat" title="${esc(PARTICIPATION_INFO)}"><span class="stat-label">Participation aux scrutins publics <i class="fa-regular fa-circle-question"></i></span><span class="stat-value text-lg">${pct(sc.participation)}</span><span class="block text-slate-500">${fmtNum(sc.votes)} votes / ${fmtNum(sc.eligibles)}</span></div>
         <div class="stat"><span class="stat-label">Votes alignés sur son groupe</span><span class="stat-value text-lg text-emerald-600 dark:text-emerald-400">${pct(sc.loyaute)}</span></div>
         <div class="stat"><span class="stat-label">Questions posées</span><span class="stat-value text-lg">${fmtNum(q.total)}</span></div>
         <div class="stat"><span class="stat-label">Propositions de loi (1er signataire)</span><span class="stat-value text-lg">${d.propositionsDeLoi != null ? fmtNum(d.propositionsDeLoi) : '—'}</span></div>
     </div>
+    <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i>${esc(PARTICIPATION_INFO)}</p>
     <div class="grid sm:grid-cols-2 gap-3 mt-3 text-xs">
         <div class="stat"><span class="stat-label">Mandat</span><span class="stat-value">Depuis le ${fmtDate(d.mandat.debut)}</span><span class="block text-slate-500">${esc(d.mandat.cause || '')}${d.mandat.premiereElection ? ' · premier mandat' : ''}${d.mandat.placeHemicycle ? ` · place n°${esc(d.mandat.placeHemicycle)}` : ''}</span></div>
         <div class="stat"><span class="stat-label">État civil</span><span class="stat-value">${d.naissance.date ? `Né${d.sexe === 'F' ? 'e' : ''} le ${fmtDate(d.naissance.date)}${age ? ` (${age} ans)` : ''}` : '—'}</span><span class="block text-slate-500">${esc([d.naissance.ville, d.naissance.departement].filter(Boolean).join(', '))}${d.profession ? ` · ${esc(d.profession)}` : ''}</span></div>

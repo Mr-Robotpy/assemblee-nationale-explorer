@@ -741,7 +741,12 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
         })
 
     built.sort(key=lambda x: (x["dateMaj"] or "", x["uid"]), reverse=True)
-    built = built[:max_dossiers]
+    # Tous les projets de loi (Gouvernement, peu nombreux) sont publiés ; les propositions et autres
+    # procédures complètent, des plus récemment actives aux plus anciennes, jusqu'au plafond.
+    projets = [b for b in built if b["categorie"] == "PJL"]
+    autres = [b for b in built if b["categorie"] != "PJL"][:max(0, max_dossiers - len(projets))]
+    keep = {b["uid"] for b in projets + autres}
+    built = [b for b in built if b["uid"] in keep]
     index = [{k: b[k] for k in ("uid", "titre", "procedure", "categorie", "initiateurs", "nbInitiateurs", "dateDepot",
                                  "dateMaj", "etape", "derniereEtape", "statut", "procedureAcceleree", "resume")}
              for b in built]

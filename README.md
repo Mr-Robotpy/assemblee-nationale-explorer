@@ -25,7 +25,8 @@ Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json �
 | `data/questions.json`, `data/questions/<QANR…>.json` | questions récentes + texte de la question et de la réponse |
 | `data/scrutins.json` | derniers scrutins, résultats par groupe |
 
-Volumes publiés (modifiables via variables d'environnement ou options CLI) : 400 dossiers, 300 scrutins,
+Volumes publiés (modifiables via variables d'environnement ou options CLI) : 400 dossiers (dont **tous** les
+projets de loi, complétés par les propositions les plus récemment actives), 300 scrutins,
 3 000 questions écrites, 1 500 questions au Gouvernement, 800 questions orales. Les statistiques (participation,
 nombre de questions…) sont calculées sur **toute** la législature.
 
