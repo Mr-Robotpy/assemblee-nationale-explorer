@@ -146,6 +146,64 @@ def http_get(url: str, timeout: int = 300, retries: int = 4) -> bytes:
     raise RuntimeError(f"Téléchargement impossible : {url}: {last}")
 
 
+def download_file(url: str, target: Path, attempts: int = 10, timeout: int = 120) -> None:
+    """Télécharge un gros fichier par blocs, en reprenant là où la connexion a coupé (en-tête Range).
+
+    Le serveur de l'AN coupe régulièrement les transferts de plusieurs dizaines de Mo :
+    un simple ré-essai complet échoue de la même façon, la reprise partielle non.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_name(target.name + ".part")
+    part.unlink(missing_ok=True)
+    total: int | None = None
+    last: Exception | None = None
+    for attempt in range(attempts):
+        done = part.stat().st_size if part.exists() else 0
+        if total is not None and done >= total:
+            break
+        headers = {"User-Agent": USER_AGENT}
+        if done:
+            headers["Range"] = f"bytes={done}-"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if done and r.status != 206:  # reprise non supportée : on repart de zéro
+                    LOG.warning("Reprise refusée par le serveur pour %s, téléchargement complet", url)
+                    done = 0
+                    part.unlink(missing_ok=True)
+                if r.status == 206:
+                    m = re.search(r"/(\d+)$", r.headers.get("Content-Range", ""))
+                    total = int(m.group(1)) if m else total
+                elif r.headers.get("Content-Length"):
+                    total = int(r.headers["Content-Length"])
+                with open(part, "ab") as f:
+                    while chunk := r.read(1 << 20):
+                        f.write(chunk)
+            size = part.stat().st_size
+            if total is None or size >= total:
+                part.replace(target)
+                return
+            last = RuntimeError(f"{size}/{total} octets reçus")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise
+            if e.code == 416:  # plage invalide : fichier changé côté serveur, on recommence
+                part.unlink(missing_ok=True)
+                total = None
+            last = e
+        except Exception as e:  # coupure réseau, timeout, IncompleteRead…
+            last = e
+        got = part.stat().st_size if part.exists() else 0
+        wait = min(2 ** (attempt + 1), 30)
+        LOG.warning("Transfert interrompu %s (%s) — %.1f/%s Mo reçus, reprise dans %ss", url.rsplit("/", 1)[1], last,
+                    got / 1e6, f"{total / 1e6:.1f}" if total else "?", wait)
+        time.sleep(wait)
+    if part.exists() and total is not None and part.stat().st_size >= total:
+        part.replace(target)
+        return
+    raise RuntimeError(f"Téléchargement impossible : {url}: {last}")
+
+
 def iter_zip_json(path: Path) -> Iterator[tuple[str, Any]]:
     with zipfile.ZipFile(path) as zf:
         for name in zf.namelist():
@@ -847,8 +905,11 @@ def fetch_sources(names: Iterable[str], cache: Path, source_dir: Path | None) ->
         target = cache / filename
         try:
             LOG.info("Téléchargement %s", url)
-            target.write_bytes(http_get(url))
-            zipfile.ZipFile(target).testzip()
+            download_file(url, target)
+            with zipfile.ZipFile(target) as zf:
+                bad = zf.testzip()
+            if bad:
+                raise RuntimeError(f"archive corrompue ({bad})")
             out[name] = target
         except Exception as e:
             LOG.error("Source %s indisponible : %s", name, e)
@@ -899,9 +960,7 @@ def main(argv: list[str] | None = None) -> int:
             scrutins, sc_meta = build_scrutins(src["scrutins"], ref, details, args.max_scrutins, 15)
             write_json(out / "scrutins.json", scrutins)
             meta["sections"]["scrutins"] = {"majLe": now, **sc_meta, "affiches": len(scrutins)}
-            for s in summaries:
-                sc = details[s["uid"]].get("scrutins") or {}
-                s["participation"] = sc.get("participation")
+            LOG.info("Scrutins : %d publiés sur %d", len(scrutins), sc_meta["total"])
         except Exception:
             LOG.exception("Échec section scrutins")
             failures.append("scrutins")
@@ -924,6 +983,7 @@ def main(argv: list[str] | None = None) -> int:
             for uid, d in by_uid.items():
                 write_json(out / "dossiers" / f"{uid}.json", d)
             write_json(out / "dossiers.json", index)
+            LOG.info("Dossiers : %d publiés, %d textes intégraux récupérés", len(index), n_txt)
             meta["sections"]["dossiers"] = {"majLe": now, "affiches": len(index), "total": dossiers_meta["total"],
                                             "textesRecuperes": n_txt}
         except Exception:
@@ -931,8 +991,17 @@ def main(argv: list[str] | None = None) -> int:
             failures.append("dossiers")
 
     # --- questions
-    qpaths = {k: src[n] for k, n in (("QE", "questions_ecrites"), ("QG", "questions_gouvernement"), ("QOSD", "questions_orales")) if n in src}
-    q_meta = None
+    qsources = (("QE", "questions_ecrites"), ("QG", "questions_gouvernement"), ("QOSD", "questions_orales"))
+    qpaths = {k: src[n] for k, n in qsources if n in src}
+    q_missing = [n for _, n in qsources if n not in src]
+    if q_missing:
+        failures.append("questions")
+        if (out / "questions.json").exists():
+            # Reconstruire avec une source en moins effacerait les questions de la veille : on garde tout.
+            LOG.error("Questions : %s indisponible(s), section de la veille conservée", ", ".join(q_missing))
+            qpaths = {}
+        else:
+            LOG.error("Questions : %s indisponible(s), publication partielle (premier passage)", ", ".join(q_missing))
     if qpaths:
         try:
             q_index, q_details, q_meta = build_questions(qpaths, ref, {"QE": args.max_qe, "QG": args.max_qg, "QOSD": args.max_qosd})
@@ -952,14 +1021,26 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             LOG.exception("Échec section questions")
             failures.append("questions")
+        else:
+            LOG.info("Questions : %d publiées sur %d", len(q_index), sum(q_meta["total"].values()))
 
     # --- députés (écrits en dernier : enrichis par les autres sections)
+    # Une section en échec ne doit pas effacer les statistiques de la veille dans les fiches.
     for s in summaries:
         d = details[s["uid"]]
-        if q_meta is not None:
-            s["questions"] = d["questions"]["total"]
         if dossiers_meta:
             d["propositionsDeLoi"] = dossiers_meta["pplParDepute"].get(s["uid"], 0)
+        missing = [k for k in ("scrutins", "questions", "propositionsDeLoi") if k not in d]
+        prev_file = out / "deputes" / f"{s['uid']}.json"
+        if missing and prev_file.exists():
+            prev = json.loads(prev_file.read_text(encoding="utf-8"))
+            for k in missing:
+                if k in prev:
+                    d[k] = prev[k]
+        if "questions" in d:
+            s["questions"] = d["questions"]["total"]
+        if "scrutins" in d:
+            s["participation"] = d["scrutins"]["participation"]
     reset_dir(out / "deputes")
     for uid, d in details.items():
         write_json(out / "deputes" / f"{uid}.json", d)
