@@ -172,7 +172,7 @@ class EtapesProgrammeesTest(unittest.TestCase):
         actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-10-01"), _acte("AN1-DEBATS-SEANCE", "2026-11-20")])]
         i, _ = self.build(actes)
         self.assertEqual(i["etape"], 1)
-        self.assertEqual(i["statut"], "Déposé")
+        self.assertEqual(i["statut"], "Déposé à l'Assemblée")
 
     def test_seance_du_jour_programmee_decision_du_jour_accomplie(self):
         actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-09-01"), _acte("AN1-DEBATS-SEANCE", "2026-11-01"),
@@ -183,6 +183,46 @@ class EtapesProgrammeesTest(unittest.TestCase):
         actes[0]["actesLegislatifs"]["acteLegislatif"].pop()  # sans décision publiée : séance du jour = programmée
         _, d = self.build(actes)
         self.assertEqual({a["code"]: a["prevu"] for a in d["actes"]}["AN1-DEBATS-SEANCE"], True)
+
+
+class StatutsDonneesReellesTest(unittest.TestCase):
+    """Séquences reprises du run du 01/11/2026."""
+
+    build = EtapesProgrammeesTest.build
+
+    def test_rapporteur_nomme_avant_le_depot_en_navette(self):
+        # DLR5L17N54608 : rapporteur AN nommé le 01/07, avant l'adoption au Sénat (08/07) et le dépôt AN (09/07)
+        actes = [
+            _acte("SN1", children=[_acte("SN1-DEPOT", "2026-06-25"), _acte("SN1-DEBATS-DEC", "2026-07-08", "adopté")]),
+            _acte("AN1", children=[_acte("AN1-DEPOT", "2026-07-09"), _acte("AN1-COM-FOND-NOMIN", "2026-07-01"),
+                                   _acte("AN1-COM-FOND-RAPPORT", "2026-09-23"), _acte("AN1-DEBATS-SEANCE", "2026-11-17")]),
+        ]
+        actes[0]["actesLegislatifs"]["acteLegislatif"][0]["texteAssocie"] = "PRJLSNR5S479B0801"
+        actes[1]["actesLegislatifs"]["acteLegislatif"][0]["texteAssocie"] = "PRJLANR5L17B3058"
+        i, d = self.build(actes)
+        self.assertEqual(i["statut"], "Adopté au Sénat — examen à l'Assemblée en cours")
+        self.assertEqual(i["prochaineEtape"]["date"], "2026-11-17")
+        self.assertEqual(d["textePrincipal"], "PRJLANR5L17B3058")  # version AN, disponible en texte intégral
+
+    def test_derniere_etape_dit_ce_qui_a_ete_decide(self):
+        actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-05-01"), _acte("AN1-DEBATS-DEC", "2026-06-01", "adoptée")])]
+        i, _ = self.build(actes)
+        self.assertEqual(i["derniereEtape"], "1re lecture — Assemblée · AN1-DEBATS-DEC : adoptée")
+
+    def test_simple_depot_n_est_pas_un_examen(self):
+        actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-05-01"), _acte("AN1-COM-FOND-SAISIE", "2026-05-01")])]
+        i, _ = self.build(actes)
+        self.assertEqual(i["statut"], "Déposé à l'Assemblée")
+        self.assertEqual(i["etape"], 1)
+        actes[0]["actesLegislatifs"]["acteLegislatif"].append(_acte("AN1-COM-FOND-REUNION", "2026-06-01"))
+        i, _ = self.build(actes)
+        self.assertEqual(i["statut"], "En cours d'examen à l'Assemblée")
+        self.assertEqual(i["etape"], 2)
+
+    def test_accord_unique(self):
+        actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-05-01"), _acte("AN1-DEBATS-DEC", "2026-06-01", "adoptée")])]
+        i, _ = self.build(actes)
+        self.assertEqual(i["statut"], "Adopté à l'Assemblée")
 
 
 class SanitizerTest(unittest.TestCase):
