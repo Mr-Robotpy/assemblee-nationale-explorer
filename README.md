@@ -57,6 +57,12 @@ les boutons Précédent / Suivant du navigateur parcourent les recherches, et «
 | Lois | `q`, `type` (`pjl`, `ppl`, `autre`), `statut` (`en-cours`, `promulguees`), `etape` (1 à 5) | `#/lois?type=pjl&etape=3` |
 | Questions | `q`, `type` (`qg`, `qe`, `qosd`), `statut` (`repondues`, `sans-reponse`) | `#/questions?type=qe&statut=repondues` |
 | Scrutins | `q` | `#/scrutins?q=finances` |
+| Recherche (tout le site) | `q` | `#/recherche?q=logement` |
+
+La recherche (champ de l'en-tête, raccourci `/`) exige que **tous les mots** apparaissent, sans tenir compte des accents
+ni des majuscules — la même règle que les listes, pour que « Voir les N résultats » ouvre une liste de N éléments.
+Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice) ou **sélection publiée**
+(lois, questions, scrutins), avec le total de la législature.
 
 ## Mise en place sur GitHub
 
