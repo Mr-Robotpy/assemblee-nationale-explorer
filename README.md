@@ -104,6 +104,13 @@ Ensuite tout est automatique : exécution quotidienne, mise à jour de la branch
 Si le serveur de l'AN est indisponible, le site est redéployé avec les données de la veille et la section en
 échec est signalée dans `meta.json` (bandeau visible sur le site).
 
+## Ressources tierces
+
+Polices (Inter), icônes (Font Awesome Free) et Chart.js sont **hébergés sur le site** (`assets/vendor/`), sans appel à
+Google Fonts ni à un CDN : l'adresse IP des visiteurs n'est transmise à aucun tiers pour afficher la page. Ils sont
+copiés depuis les paquets npm figés dans `package.json` par `npm run vendor` (licences jointes, voir
+`assets/vendor/README.md`). Seules les photos des députés sont chargées depuis le site de l'Assemblée nationale.
+
 ## En local
 
 ```bash
