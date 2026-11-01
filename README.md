@@ -46,6 +46,18 @@ L'index des questions est chargé à la première ouverture de l'onglet Question
 de la législature (plus de 20 000), il pèserait plusieurs Mo (estimation) et rendrait l'onglet lent sur mobile. Les plafonds
 ne concernent que l'affichage : les compteurs et statistiques couvrent toute la législature.
 
+## Liens partageables
+
+Les filtres de chaque liste sont dans l'URL (valeurs par défaut omises, valeurs inconnues ignorées) ;
+les boutons Précédent / Suivant du navigateur parcourent les recherches, et « Copier le lien » copie l'adresse.
+
+| Liste | Paramètres | Exemple |
+|---|---|---|
+| Députés | `q`, `groupe` (uid PO…), `commission`, `sexe` (`F`/`H`), `tri` (`dept`, `participation`, `questions`) | `#/deputes?groupe=PO845401&tri=questions` |
+| Lois | `q`, `type` (`pjl`, `ppl`, `autre`), `statut` (`en-cours`, `promulguees`), `etape` (1 à 5) | `#/lois?type=pjl&etape=3` |
+| Questions | `q`, `type` (`qg`, `qe`, `qosd`), `statut` (`repondues`, `sans-reponse`) | `#/questions?type=qe&statut=repondues` |
+| Scrutins | `q` | `#/scrutins?q=finances` |
+
 ## Mise en place sur GitHub
 
 1. **Settings → Pages → Build and deployment → Source : « GitHub Actions »**.
