@@ -15,7 +15,7 @@ const QTYPE_BADGE = {
 const state = {
     meta: null, deputes: [], groupes: [], dossiers: [], questions: [], scrutins: [],
     shown: { deputes: PAGE.deputes, lois: PAGE.lois, questions: PAGE.questions, scrutins: PAGE.scrutins },
-    loiCat: '', loiStatus: '', qType: '',
+    loiCat: '', loiStatus: '', loiStep: 0, qType: '',
     charts: {},
 };
 const cache = new Map();
@@ -204,6 +204,12 @@ function bindFilters() {
         if (b.dataset.status !== undefined) { state.loiStatus = b.dataset.status; toggleChips('#loiCatFilter [data-status]', b); }
         resetAnd('lois', renderBills)();
     });
+    $('#loiStepFilter').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-step]');
+        if (!b) return;
+        state.loiStep = state.loiStep === +b.dataset.step ? 0 : +b.dataset.step;  // re-cliquer annule le filtre
+        resetAnd('lois', renderBills)();
+    });
     $('#billsMore').addEventListener('click', () => { state.shown.lois += PAGE.lois; renderBills(); });
 
     $('#questionSearch').addEventListener('input', debounce(resetAnd('questions', renderQuestions)));
@@ -387,9 +393,10 @@ function renderDeputies() {
 }
 
 /* ---------------------------------------------------------------- lois */
-function filteredBills() {
+function filteredBills(ignoreStep = false) {
     const q = norm($('#loiSearch').value.trim());
     return state.dossiers.filter((d) =>
+        (ignoreStep || !state.loiStep || d.etape === state.loiStep) &&
         (!state.loiCat || d.categorie === state.loiCat) &&
         (!state.loiStatus || (state.loiStatus === 'prom' ? d.etape === 5 : d.etape < 5)) &&
         (!q || norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`).includes(q)));
@@ -412,7 +419,15 @@ function statusBadge(statut, etape, decision) {
 function renderBills() {
     if (isDown('dossiers')) { $('#loisCount').textContent = 'Données indisponibles'; $('#billsList').innerHTML = unavailable(['dossiers'], 'Projets et propositions de loi'); moreButton('#billsMore', 0, 0); return; }
     const list = filteredBills();
-    $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés — tous les projets de loi, et les propositions les plus récemment actives`;
+    // Effectif par étape, calculé avec les autres filtres actifs (type, statut, recherche)
+    const parEtape = [0, 0, 0, 0, 0];
+    filteredBills(true).forEach((d) => { if (d.etape >= 1 && d.etape <= 5) parEtape[d.etape - 1] += 1; });
+    document.querySelectorAll('#loiStepFilter [data-step]').forEach((b) => {
+        b.setAttribute('aria-pressed', String(+b.dataset.step === state.loiStep));
+        b.querySelector('.step-count').textContent = `${fmtNum(parEtape[b.dataset.step - 1])} texte(s)`;
+    });
+    const etape = state.loiStep ? ` à l'étape « ${STEP_LABELS[state.loiStep - 1]} »` : '';
+    $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés${etape} — tous les projets de loi, et les propositions les plus récemment actives`;
     const el = $('#billsList');
     if (!list.length) { el.innerHTML = emptyState('Aucun texte ne correspond.'); moreButton('#billsMore', 0, 0); return; }
     el.innerHTML = list.slice(0, state.shown.lois).map((d) => `
