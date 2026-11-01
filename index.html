@@ -57,6 +57,10 @@
                 <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hidden 2xl:inline-flex items-center text-xs text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg">
                     data.assemblee-nationale.fr <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
                 </a>
+                <a href="#/suivis" id="followsLink" class="relative p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-600" title="Vos suivis" aria-label="Vos suivis">
+                    <i class="fa-solid fa-star"></i>
+                    <span id="followsBadge" class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center"></span>
+                </a>
                 <button id="themeToggle" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-600" title="Basculer le thème" aria-label="Basculer le thème">
                     <i class="fa-solid fa-moon dark:hidden"></i><i class="fa-solid fa-sun hidden dark:inline"></i>
                 </button>
@@ -91,6 +95,7 @@
             </div>
             <div class="absolute -right-10 -bottom-10 opacity-10 text-white text-9xl pointer-events-none"><i class="fa-solid fa-landmark"></i></div>
         </div>
+        <div id="dashFollows"></div>
         <div id="kpis" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="card lg:col-span-2">
@@ -245,6 +250,19 @@
     </section>
 
     <!-- ==================== DONNÉES / API ==================== -->
+    <!-- ==================== SUIVIS (stockés dans le navigateur) ==================== -->
+    <section id="tab-suivis" class="tab-content hidden space-y-6">
+        <div class="card space-y-2">
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2"><i class="fa-solid fa-star text-amber-500"></i>Vos suivis</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Enregistrés <strong>uniquement dans ce navigateur</strong>, sans compte : rien n'est envoyé ailleurs. Ils ne suivent pas
+                d'un appareil à l'autre et disparaissent si vous effacez les données du site. Les changements sont détectés à chaque
+                mise à jour quotidienne des données.
+            </p>
+        </div>
+        <div id="followsContent" class="space-y-6"></div>
+    </section>
+
     <!-- ==================== RECHERCHE TRANSVERSALE ==================== -->
     <section id="tab-recherche" class="tab-content hidden space-y-6">
         <div class="card space-y-3">
