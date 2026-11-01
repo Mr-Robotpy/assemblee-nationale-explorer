@@ -89,17 +89,33 @@ function initials(d) {
 function avatar(d, size = 'w-12 h-12', ring = '') {
     const color = groupColor(d.groupeUid);
     return `<span class="relative inline-flex ${size} shrink-0">
-        <span class="absolute inset-0 rounded-full flex items-center justify-center text-white font-bold text-sm" style="background:${esc(color)}">${initials(d)}</span>
+        <span class="absolute inset-0 rounded-full flex items-center justify-center font-bold text-sm" style="background:${esc(color)};color:${inkOn(color)}">${initials(d)}</span>
         <img src="${esc(d.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="relative ${size} rounded-full object-cover border border-slate-200 dark:border-slate-600 ${ring}" onerror="this.remove()">
     </span>`;
 }
 function groupColor(uid) {
     return (state.groupes.find((g) => g.uid === uid) || {}).couleur || '#94a3b8';
 }
+/* Texte lisible sur une couleur de groupe : noir ou blanc selon le meilleur rapport de contraste WCAG 2.x.
+ * Les couleurs officielles vont du bleu nuit (RN) au jaune (LIOT) : un texte toujours blanc était illisible sur les claires. */
+const INK_DARK = '#0f172a', INK_LIGHT = '#ffffff';
+function luminance(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return null;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+const contrastRatio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+function inkOn(bg) {
+    const l = luminance(bg);
+    if (l === null) return INK_LIGHT;
+    return contrastRatio(l, luminance(INK_DARK)) >= contrastRatio(l, 1) ? INK_DARK : INK_LIGHT;
+}
 function groupBadge(abrev, uid) {
     if (!abrev) return '';
     const c = groupColor(uid);
-    return `<span class="badge text-white" style="background:${esc(c)}">${esc(abrev)}</span>`;
+    return `<span class="badge" style="background:${esc(c)};color:${inkOn(c)}">${esc(abrev)}</span>`;
 }
 function emptyState(msg) {
     return `<div class="col-span-full p-8 text-center text-slate-500 text-sm card">${esc(msg)}</div>`;
