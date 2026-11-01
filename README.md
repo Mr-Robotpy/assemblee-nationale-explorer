@@ -36,8 +36,16 @@ postaux et populations viennent de l'API Découpage administratif (geo.api.gouv.
 2010 : la table n'est reconstruite que tous les 30 jours (`--force-communes` pour forcer). Le calcul échoue — et la
 table précédente est conservée — si plus de 50 bureaux ne peuvent pas être rattachés.
 
-Limite : une commune partagée entre plusieurs circonscriptions (grandes villes) affiche tous les députés concernés ;
+Paris, Lyon et Marseille sont détaillés **par arrondissement** : le numéro de bureau de vote y commence par le numéro
+d'arrondissement (« 1102 » = 11e, bureau 02), ou le bureau est directement codé par l'arrondissement (13201). Une
+recherche « Paris » propose de choisir l'arrondissement ; « 75011 » mène directement au 11e. Noms et codes postaux des
+arrondissements : API Découpage administratif (`type=arrondissement-municipal`), sinon déduits.
+
+Limite : une commune ou un arrondissement partagé entre plusieurs circonscriptions affiche tous les députés concernés ;
 la circonscription exacte figure sur la carte électorale.
+
+Le format de la table est versionné (`COMMUNES_VERSION`) : un changement de format force le recalcul sans attendre
+les 30 jours.
 
 Volumes publiés (modifiables via variables d'environnement ou options CLI) : 400 dossiers (dont **tous** les
 projets de loi, complétés par les propositions les plus récemment actives), 300 scrutins,

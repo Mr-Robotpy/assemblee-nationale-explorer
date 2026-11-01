@@ -238,6 +238,9 @@ class CommunesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.d = Path(self.tmp.name)
+        # Aucun accès réseau dans les tests : un téléchargement inattendu échoue tout de suite.
+        self._dl = bd.download_file
+        bd.download_file = lambda *a, **k: (_ for _ in ()).throw(AssertionError(f"téléchargement inattendu : {a[0]}"))
         # deux circonscriptions dans l'Ain, une en Corse-du-Sud, une à l'étranger, une à Saint-Pierre-et-Miquelon
         _csv(self.d / "circ.csv", ["Code département", "Libellé département", "Code circonscription législative"] + CAND, [
             ["01", "Ain", "0101", "DUPONT", "Anne", "10", "MARTIN", "Paul", "8"],
@@ -267,6 +270,7 @@ class CommunesTest(unittest.TestCase):
         self.keys = {("01", "1"), ("01", "2"), ("2A", "1"), ("099", "3"), ("975", "1")}
 
     def tearDown(self):
+        bd.download_file = self._dl
         self.tmp.cleanup()
 
     def build(self, **kw):
@@ -306,11 +310,13 @@ class CommunesTest(unittest.TestCase):
         out = self.d / "out"
         out.mkdir()
         (out / "communes.json").write_text("{}")
-        meta = {"sections": {"communes": {"majLe": "2026-10-20T04:30:00Z"}}}
+        meta = {"sections": {"communes": {"majLe": "2026-10-20T04:30:00Z", "version": bd.COMMUNES_VERSION}}}
         self.assertIsNone(bd.update_communes(out, self.d, None, self.keys, meta, "2026-11-01T04:30:00Z"))  # 12 j : conservée
         src = self.d / "src"
         src.mkdir()
         for k, f in bd.COMMUNES_FILES.items():
+            if k in bd.COMMUNES_OPTIONAL:  # absent : la table doit se construire quand même
+                continue
             target = src / f
             if k == "geo":
                 target.write_text(json.dumps(self.geo), encoding="utf-8")
@@ -320,6 +326,39 @@ class CommunesTest(unittest.TestCase):
         res = bd.update_communes(out, self.d, src, self.keys, meta, "2026-11-01T04:30:00Z", min_communes=1)
         self.assertEqual(res["communes"], 6)
         self.assertEqual(len(json.loads((out / "communes.json").read_text())["c"]), 6)
+        # table récente mais d'un ancien format : recalculée (sinon un changement de format attendrait 30 jours)
+        meta["sections"]["communes"] = {"majLe": "2026-10-31T04:30:00Z", "version": bd.COMMUNES_VERSION - 1}
+        self.assertIsNotNone(bd.update_communes(out, self.d, src, self.keys, meta, "2026-11-01T04:30:00Z", min_communes=1))
+
+    def test_paris_lyon_marseille(self):
+        """Paris codé par la ville + numéro de bureau (« 1102 » = 11e) ; Marseille codé par arrondissement."""
+        _csv(self.d / "circ.csv", ["Code département", "Libellé département", "Code circonscription législative"] + CAND, [
+            ["75", "Paris", "7501", "ALPHA", "A", "1", "", "", ""],
+            ["75", "Paris", "7507", "BETA", "B", "1", "", "", ""],
+            ["75", "Paris", "7506", "GAMMA", "G", "1", "", "", ""],
+            ["13", "Bouches-du-Rhône", "1304", "DELTA", "D", "1", "", "", ""],
+        ])
+        _csv(self.d / "bv.csv", self.bv_head, [
+            ["75", "Paris", "75056", "Paris", "0101", "ALPHA", "A", "1", "", "", ""],   # 1er
+            ["75", "Paris", "75056", "Paris", "1101", "BETA", "B", "1", "", "", ""],    # 11e, bureau 01
+            ["75", "Paris", "75056", "Paris", "1145", "GAMMA", "G", "1", "", "", ""],   # 11e partagé
+            ["75", "Paris", "75056", "Paris", "1601", "BETA", "B", "1", "", "", ""],    # 16e
+            ["13", "Bouches-du-Rhône", "13201", "Marseille 1er Arrondissement", "0001", "DELTA", "D", "1", "", "", ""],
+        ])
+        self.geo = [{"nom": "Paris", "code": "75056", "codeDepartement": "75", "codesPostaux": ["75001", "75011"], "population": 2100000},
+                    {"nom": "Paris 11e Arrondissement", "code": "75111", "codeDepartement": "75", "codesPostaux": ["75011"], "population": 140000}]
+        self.keys = {("75", "1"), ("75", "6"), ("75", "7"), ("13", "4")}
+        doc, stats = self.build()
+        c = {l[1]: l for l in doc["c"]}
+        self.assertEqual(c["75056"][4], [1, 6, 7])                       # la ville : toutes ses circonscriptions
+        self.assertEqual(c["75111"][0], "Paris 11e Arrondissement")      # nom donné par l'API
+        self.assertEqual(c["75111"][4], [6, 7])                          # arrondissement partagé
+        self.assertEqual(c["75111"][6], "75056")                         # rattaché à sa ville
+        self.assertEqual(c["75101"][:5], ["Paris 1er arrondissement", "75101", "75001", "75", [1]])  # déduit sans l'API
+        self.assertEqual(c["75116"][2], "75016 75116")
+        self.assertEqual(c["13201"][4:], [[4], 0, "13055"])              # Marseille codé par arrondissement
+        self.assertEqual(c["13055"][:5], ["Marseille", "13055", "", "13", [4]])  # ville reconstituée
+        self.assertEqual(stats["arrondissements"], 4)
 
 
 class SanitizerTest(unittest.TestCase):
