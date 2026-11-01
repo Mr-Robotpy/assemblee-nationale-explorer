@@ -84,6 +84,11 @@ jobs:
           mkdir -p _site
           cp -r index.html assets data _site/
           touch _site/.nojekyll
+          # Version propre au déploiement : le navigateur ne peut pas associer le nouvel index.html
+          # à un ancien app.js resté en cache (GitHub Pages autorise 10 min de cache).
+          v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          sed -i -E "s#(assets/app\.(css|js))\"#\1?v=${v}\"#g" _site/index.html
+          test "$(grep -c "?v=${v}" _site/index.html)" -eq 2 || { echo "Versionnage des assets introuvable dans index.html"; exit 1; }
 
       - uses: actions/upload-pages-artifact@v3
         with:
