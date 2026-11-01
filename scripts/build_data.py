@@ -977,10 +977,41 @@ COMMUNES_SOURCES = {
     "bv": _R24 + "20240710-171445/resultats-definitifs-par-bureau-de-vote.csv",
     "circ": _R24 + "20240710-171413/resultats-definitifs-par-circonscriptions-legislatives.csv",
     "geo": "https://geo.api.gouv.fr/communes?fields=nom,code,codesPostaux,codeDepartement,population&format=json",
+    "geo_arr": "https://geo.api.gouv.fr/communes?type=arrondissement-municipal"
+               "&fields=nom,code,codesPostaux,codeDepartement,population&format=json",
 }
 COMMUNES_FILES = {"bv": "resultats-definitifs-par-bureau-de-vote.csv",
-                  "circ": "resultats-definitifs-par-circonscriptions-legislatives.csv", "geo": "communes-geo.json"}
+                  "circ": "resultats-definitifs-par-circonscriptions-legislatives.csv", "geo": "communes-geo.json",
+                  "geo_arr": "arrondissements-geo.json"}
+COMMUNES_OPTIONAL = {"geo_arr"}  # sans elle : noms et codes postaux des arrondissements déduits
 COMMUNES_MAX_AGE_DAYS = 30
+COMMUNES_VERSION = 2  # à incrémenter quand le format change : force le recalcul malgré les 30 jours
+
+# Paris, Lyon et Marseille votent par arrondissement : le numéro de bureau commence par le numéro
+# d'arrondissement (« 1102 » = 11e, bureau 02). code INSEE de la ville → (base des codes d'arrondissement, nombre, nom)
+PLM = {"75056": (75100, 20, "Paris"), "69123": (69380, 9, "Lyon"), "13055": (13200, 16, "Marseille")}
+
+
+def _plm_arrondissement(code: str) -> tuple[str, int] | None:
+    """Code INSEE d'arrondissement (75111, 69383, 13201…) → (code de la ville, numéro), sinon None."""
+    if not code.isdigit():
+        return None
+    for ville, (base, n_max, _) in PLM.items():
+        if base < int(code) <= base + n_max:
+            return ville, int(code) - base
+    return None
+
+
+def _plm_defaut(ville: str, n: int) -> tuple[str, str]:
+    """Nom et codes postaux d'un arrondissement si l'API ne les fournit pas."""
+    nom = f"{PLM[ville][2]} {n}{'er' if n == 1 else 'e'} arrondissement"
+    if ville == "75056":
+        cps = f"750{n:02d}" + (" 75116" if n == 16 else "")
+    elif ville == "69123":
+        cps = f"6900{n}"
+    else:
+        cps = f"130{n:02d}"
+    return nom, cps
 
 
 def _dept_an(code: str) -> str:
@@ -1052,6 +1083,7 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
     rows = _csv_rows(bv_path)
     header = next(rows)
     b_dep, b_com, b_nom = header.index("Code département"), header.index("Code commune"), header.index("Libellé commune")
+    b_bv = header.index("Code BV") if "Code BV" in header else None
     cols = _candidate_columns(header)
     communes: dict[str, dict] = {}
     non_relies = 0
@@ -1062,7 +1094,23 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
         if not circ:
             non_relies += 1
             continue
-        x = communes.setdefault(_insee(r[b_com]), {"nom": r[b_nom].strip(), "dept": circ[0], "circs": set()})
+        code = _insee(r[b_com])
+        # Paris / Lyon / Marseille : rattacher aussi le bureau à son arrondissement, qu'il soit codé par la ville
+        # (75056 + bureau « 1102 ») ou directement par l'arrondissement (13201).
+        arr = _plm_arrondissement(code)
+        if arr is None and code in PLM and b_bv is not None:
+            bv = re.sub(r"\D", "", r[b_bv])
+            n = int(bv[:-2]) if len(bv) >= 3 else 0
+            if 1 <= n <= PLM[code][1]:
+                arr = (code, n)
+        if arr:
+            ville, n = arr
+            a = communes.setdefault(str(PLM[ville][0] + n), {"nom": _plm_defaut(ville, n)[0], "dept": circ[0],
+                                                            "circs": set(), "parent": ville})
+            a["circs"].add(circ[1])
+            code = ville
+        x = communes.setdefault(code, {"nom": PLM[code][2] if code in PLM else r[b_nom].strip(), "dept": circ[0],
+                                       "circs": set()})
         x["circs"].add(circ[1])
     if non_relies > max_unmatched or len(communes) < min_communes:
         raise RuntimeError(f"rapprochement incomplet : {non_relies} bureaux non reliés, {len(communes)} communes")
@@ -1081,14 +1129,22 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
             sans += 1
             continue
         vues.add(code)
-        lignes.append([g.get("nom") or x["nom"], code, " ".join(sorted(set(g.get("codesPostaux") or []))), x["dept"],
-                       sorted(x["circs"]), int(g.get("population") or 0)])
-    for code, x in communes.items():  # communes du scrutin absentes de l'API (étranger, collectivités…)
+        ligne = [g.get("nom") or x["nom"], code, " ".join(sorted(set(g.get("codesPostaux") or []))), x["dept"],
+                 sorted(x["circs"]), int(g.get("population") or 0)]
+        if x.get("parent"):
+            ligne.append(x["parent"])
+        lignes.append(ligne)
+    for code, x in communes.items():  # absentes de l'API (étranger, collectivités, arrondissements si API indisponible)
         if code not in vues:
-            lignes.append([x["nom"], code, "", x["dept"], sorted(x["circs"]), 0])
+            ligne = [x["nom"], code, "", x["dept"], sorted(x["circs"]), 0]
+            if x.get("parent"):
+                ligne[2] = _plm_defaut(x["parent"], int(code) - PLM[x["parent"]][0])[1]
+                ligne.append(x["parent"])
+            lignes.append(ligne)
     lignes.sort(key=lambda l: (l[3], l[1]))
     inconnues = sorted({(l[3], str(c)) for l in lignes for c in l[4]} - deputes_keys)
     stats = {"communes": len(lignes), "partagees": sum(1 for l in lignes if len(l[4]) > 1),
+             "arrondissements": sum(1 for l in lignes if len(l) > 6), "version": COMMUNES_VERSION,
              "bureauxNonRelies": non_relies, "communesSansCorrespondance": sans,
              "circonscriptionsSansDepute": len(inconnues)}
     if inconnues:
@@ -1097,7 +1153,8 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
     doc = {"sources": ["Ministère de l'Intérieur — résultats des élections législatives 2024 par bureau de vote "
                        "(data.gouv.fr, Licence Ouverte)",
                        "Etalab — API Découpage administratif (geo.api.gouv.fr) : communes et codes postaux"],
-           "colonnes": ["nom", "codeInsee", "codesPostaux", "departement", "circonscriptions", "population"],
+           "colonnes": ["nom", "codeInsee", "codesPostaux", "departement", "circonscriptions", "population",
+                        "villeParente (arrondissements de Paris, Lyon, Marseille)"],
            "c": lignes}
     return doc, stats
 
@@ -1109,10 +1166,10 @@ def update_communes(out: Path, cache: Path, source_dir: Path | None, deputes_key
     prev = meta.get("sections", {}).get("communes", {})
     if target.exists() and not force and prev.get("majLe"):
         age = (datetime.strptime(now[:10], "%Y-%m-%d") - datetime.strptime(prev["majLe"][:10], "%Y-%m-%d")).days
-        if age < COMMUNES_MAX_AGE_DAYS:
+        if age < COMMUNES_MAX_AGE_DAYS and prev.get("version") == COMMUNES_VERSION:
             LOG.info("Communes : table du %s conservée (%d j)", prev["majLe"][:10], age)
             return None
-    if source_dir and not all((source_dir / f).exists() for f in COMMUNES_FILES.values()):
+    if source_dir and not all((source_dir / f).exists() for k, f in COMMUNES_FILES.items() if k not in COMMUNES_OPTIONAL):
         LOG.info("Communes : fichiers absents de %s, section ignorée", source_dir)
         return None
     paths = {}
@@ -1120,12 +1177,22 @@ def update_communes(out: Path, cache: Path, source_dir: Path | None, deputes_key
         p = (source_dir or cache) / COMMUNES_FILES[key]
         if not source_dir:
             LOG.info("Téléchargement %s", url)
-            download_file(url, p)
-        paths[key] = p
+            try:
+                download_file(url, p)
+            except Exception as e:
+                if key not in COMMUNES_OPTIONAL:
+                    raise
+                LOG.warning("Communes : %s indisponible (%s), valeurs déduites", key, e)
+                continue
+        if p.exists():
+            paths[key] = p
     geo = json.loads(paths["geo"].read_text(encoding="utf-8"))
+    if "geo_arr" in paths:
+        geo += json.loads(paths["geo_arr"].read_text(encoding="utf-8"))
     doc, stats = build_communes(paths["bv"], paths["circ"], geo, deputes_keys, min_communes=min_communes)
     write_json(target, doc)
-    LOG.info("Communes : %d reliées (%d partagées entre plusieurs circonscriptions)", stats["communes"], stats["partagees"])
+    LOG.info("Communes : %d reliées (%d partagées entre plusieurs circonscriptions, %d arrondissements)",
+             stats["communes"], stats["partagees"], stats["arrondissements"])
     return {"majLe": now, **stats}
 
 

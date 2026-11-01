@@ -847,17 +847,39 @@ function renderCommunes(q, toks) {
             .map((h) => ({ r: h.r, rank: norm(h.r[0]) === exact ? 0 : norm(h.r[0]).startsWith(exact) ? 1 : 2 }))
             .sort((a, b) => a.rank - b.rank || b.r[5] - a.r[5]).map((h) => h.r);
     }
+    // Paris, Lyon, Marseille : la ville (toutes ses circonscriptions) s'efface derrière ses arrondissements quand
+    // l'un d'eux correspond (code postal 75011) ; affichée seule, elle propose de choisir l'arrondissement.
+    const hitCodes = new Set(hits.map((r) => r[1]));
+    if (isCode) {
+        const villes = new Set(hits.filter((r) => r[6]).map((r) => r[6]));  // « 75011 » : l'arrondissement, pas la ville
+        hits = hits.filter((r) => !villes.has(r[1]));
+    } else {
+        hits = hits.filter((r) => !(r[6] && hitCodes.has(r[6])));          // « Paris » : la ville, qui propose ses arrondissements
+    }
+    const parentsAffiches = new Set(hits.filter((r) => rows.some((x) => x[6] === r[1])).map((r) => r[1]));
     if (!hits.length) {
         return isCode ? { html: wrap(`<p class="text-sm text-slate-500">Aucune commune pour le code « ${esc(code)} ».</p>`), count: 0 } : { html: '', count: 0 };
     }
+    const villeCard = (r) => {
+        const arr = rows.filter((x) => x[6] === r[1]).sort((a, b) => a[1].localeCompare(b[1]));
+        const label = (x) => { const n = Number(x[1]) - Number(arr[0][1]) + 1; return n === 1 ? '1<sup>er</sup>' : `${n}<sup>e</sup>`; };
+        return `<div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700 space-y-2">
+            <p class="text-sm"><span class="font-bold text-slate-900 dark:text-white">${esc(r[0])}</span>
+                <span class="text-slate-500">· ${r[4].length} circonscriptions</span></p>
+            <p class="text-xs text-slate-600 dark:text-slate-300">Choisissez votre arrondissement (ou tapez votre code postal) :</p>
+            <div class="flex flex-wrap gap-1.5">${arr.map((x) => `<a href="#/recherche?q=${encodeURIComponent(x[1])}" class="chip !px-2.5 !py-1 text-xs"
+                title="${esc(x[0])} · ${esc(x[2])}">${label(x)}</a>`).join('')}</div>
+        </div>`;
+    };
     const card = (r) => {
+        if (parentsAffiches.has(r[1])) return villeCard(r);
         const [nom, , cps, dept, circs] = r;
         const deps = circs.map((c) => ({ c, d: deputeParCirco(dept, String(c)) }));
         const deptNom = (deps.find((x) => x.d) || {}).d?.departement || dept;
         return `<div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700 space-y-2">
             <p class="text-sm"><span class="font-bold text-slate-900 dark:text-white">${esc(nom)}</span>
                 <span class="text-slate-500">· ${esc(deptNom)} (${esc(dept)})${cps ? ` · ${esc(cps)}` : ''}</span></p>
-            ${circs.length > 1 ? `<p class="text-xs text-amber-700 dark:text-amber-300"><i class="fa-solid fa-circle-info mr-1"></i>Commune partagée entre ${circs.length} circonscriptions : la vôtre figure sur votre carte électorale.</p>` : ''}
+            ${circs.length > 1 ? `<p class="text-xs text-amber-700 dark:text-amber-300"><i class="fa-solid fa-circle-info mr-1"></i>${r[6] ? 'Arrondissement partagé' : 'Commune partagée'} entre ${circs.length} circonscriptions : la vôtre figure sur votre carte électorale.</p>` : ''}
             <div class="grid sm:grid-cols-2 gap-2">${deps.map(({ c, d }) => (d
         ? `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2 flex items-center gap-3 bg-white dark:bg-slate-800">${avatar(d, 'w-9 h-9')}
                 <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
