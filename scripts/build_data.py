@@ -964,6 +964,171 @@ def build_questions(paths: dict[str, Path], ref: Referentiel, max_per_type: dict
     return index, details, meta
 
 
+# --------------------------------------------------------------------------- communes → circonscriptions
+# Pour « retrouver mon député » à partir de sa commune ou de son code postal. Les données de l'AN ne relient
+# pas communes et circonscriptions. Méthode (déjà employée par le projet aux-voix) : les résultats officiels
+# des législatives 2024 par bureau de vote ne portent pas le code de circonscription, mais la liste des
+# candidats d'un bureau est celle de sa circonscription, unique dans un département.
+# Le découpage est inchangé depuis 2010 : la table n'est reconstruite que tous les 30 jours (codes postaux).
+
+_R24 = ("https://static.data.gouv.fr/resources/"
+        "elections-legislatives-des-30-juin-et-7-juillet-2024-resultats-definitifs-du-1er-tour/")
+COMMUNES_SOURCES = {
+    "bv": _R24 + "20240710-171445/resultats-definitifs-par-bureau-de-vote.csv",
+    "circ": _R24 + "20240710-171413/resultats-definitifs-par-circonscriptions-legislatives.csv",
+    "geo": "https://geo.api.gouv.fr/communes?fields=nom,code,codesPostaux,codeDepartement,population&format=json",
+}
+COMMUNES_FILES = {"bv": "resultats-definitifs-par-bureau-de-vote.csv",
+                  "circ": "resultats-definitifs-par-circonscriptions-legislatives.csv", "geo": "communes-geo.json"}
+COMMUNES_MAX_AGE_DAYS = 30
+
+
+def _dept_an(code: str) -> str:
+    """Code de département du ministère → code utilisé par l'AN (ZZ : Français de l'étranger, ZX : St-Barth/St-Martin)."""
+    code = code.strip()
+    if code in ("ZZ", "099"):
+        return "099"
+    if code in ("ZX", "977", "978"):
+        return "977"
+    return code.zfill(2) if code.isdigit() and len(code) < 2 else code
+
+
+def _insee(code: str) -> str:
+    code = code.strip()
+    if code.startswith("ZX"):
+        return "97" + code[2:]
+    return code.zfill(5) if code.isdigit() else code
+
+
+def _csv_rows(path: Path) -> Iterator[list[str]]:
+    """Lecture en flux (fichiers de ~100 Mo) ; séparateur « ; », UTF-8 ou Latin-1 selon le fichier."""
+    with open(path, "rb") as f:
+        sample = f.read(2_000_000)
+    sample = sample[: sample.rfind(b"\n") + 1] or sample
+    try:
+        sample.decode("utf-8")
+        enc = "utf-8-sig"
+    except UnicodeDecodeError:
+        enc = "latin-1"
+    import csv
+    with open(path, encoding=enc, newline="") as f:
+        yield from csv.reader(f, delimiter=";")
+
+
+def _candidate_columns(header: list[str]) -> list[tuple[int, int]]:
+    cols, i = [], 1
+    while f"Nom candidat {i}" in header and f"Prénom candidat {i}" in header:
+        cols.append((header.index(f"Nom candidat {i}"), header.index(f"Prénom candidat {i}")))
+        i += 1
+    if not cols:
+        raise ValueError("colonnes « Nom candidat N » introuvables")
+    return cols
+
+
+def _candidates(row: list[str], cols: list[tuple[int, int]]) -> tuple:
+    out = []
+    for kn, kp in cols:
+        nom = row[kn].strip().upper() if kn < len(row) else ""
+        if nom:
+            out.append((nom, row[kp].strip().upper() if kp < len(row) else ""))
+    return tuple(sorted(out))
+
+
+def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys: set[tuple[str, str]],
+                   min_communes: int = 30000, max_unmatched: int = 50) -> tuple[dict, dict]:
+    """Retourne (document communes.json, statistiques). Lève une erreur si le rapprochement est incomplet."""
+    rows = _csv_rows(circ_path)
+    header = next(rows)
+    i_dep, i_circ = header.index("Code département"), header.index("Code circonscription législative")
+    cols = _candidate_columns(header)
+    par_candidats: dict[tuple, tuple[str, int]] = {}
+    for r in rows:
+        if len(r) <= i_circ or not r[i_dep].strip():
+            continue
+        d = r[i_dep].strip()
+        num = int(re.sub(r"\D", "", r[i_circ].strip()[len(d):]) or 0)
+        par_candidats[(d, _candidates(r, cols))] = (_dept_an(d), num)
+
+    rows = _csv_rows(bv_path)
+    header = next(rows)
+    b_dep, b_com, b_nom = header.index("Code département"), header.index("Code commune"), header.index("Libellé commune")
+    cols = _candidate_columns(header)
+    communes: dict[str, dict] = {}
+    non_relies = 0
+    for r in rows:
+        if len(r) <= b_nom or not r[b_dep].strip():
+            continue
+        circ = par_candidats.get((r[b_dep].strip(), _candidates(r, cols)))
+        if not circ:
+            non_relies += 1
+            continue
+        x = communes.setdefault(_insee(r[b_com]), {"nom": r[b_nom].strip(), "dept": circ[0], "circs": set()})
+        x["circs"].add(circ[1])
+    if non_relies > max_unmatched or len(communes) < min_communes:
+        raise RuntimeError(f"rapprochement incomplet : {non_relies} bureaux non reliés, {len(communes)} communes")
+
+    # Communes actuelles (fusions récentes, codes postaux, population) : API Découpage administratif.
+    circs_par_dept: dict[str, set[int]] = defaultdict(set)
+    for x in communes.values():
+        circs_par_dept[x["dept"]].update(x["circs"])
+    lignes, vues, sans = [], set(), 0
+    for g in geo:
+        code, dep = g.get("code", ""), _dept_an(g.get("codeDepartement", ""))
+        x = communes.get(code)
+        if x is None and len(circs_par_dept.get(dep, ())) == 1:  # département à circonscription unique
+            x = {"nom": g.get("nom", ""), "dept": dep, "circs": set(circs_par_dept[dep])}
+        if x is None:
+            sans += 1
+            continue
+        vues.add(code)
+        lignes.append([g.get("nom") or x["nom"], code, " ".join(sorted(set(g.get("codesPostaux") or []))), x["dept"],
+                       sorted(x["circs"]), int(g.get("population") or 0)])
+    for code, x in communes.items():  # communes du scrutin absentes de l'API (étranger, collectivités…)
+        if code not in vues:
+            lignes.append([x["nom"], code, "", x["dept"], sorted(x["circs"]), 0])
+    lignes.sort(key=lambda l: (l[3], l[1]))
+    inconnues = sorted({(l[3], str(c)) for l in lignes for c in l[4]} - deputes_keys)
+    stats = {"communes": len(lignes), "partagees": sum(1 for l in lignes if len(l[4]) > 1),
+             "bureauxNonRelies": non_relies, "communesSansCorrespondance": sans,
+             "circonscriptionsSansDepute": len(inconnues)}
+    if inconnues:
+        LOG.warning("Communes : %d circonscriptions sans député en exercice (sièges vacants ?) : %s",
+                    len(inconnues), inconnues[:10])
+    doc = {"sources": ["Ministère de l'Intérieur — résultats des élections législatives 2024 par bureau de vote "
+                       "(data.gouv.fr, Licence Ouverte)",
+                       "Etalab — API Découpage administratif (geo.api.gouv.fr) : communes et codes postaux"],
+           "colonnes": ["nom", "codeInsee", "codesPostaux", "departement", "circonscriptions", "population"],
+           "c": lignes}
+    return doc, stats
+
+
+def update_communes(out: Path, cache: Path, source_dir: Path | None, deputes_keys: set[tuple[str, str]],
+                    meta: dict, now: str, force: bool = False, min_communes: int = 30000) -> dict | None:
+    """Reconstruit data/communes.json si absent, trop ancien ou forcé ; sinon conserve l'existant."""
+    target = out / "communes.json"
+    prev = meta.get("sections", {}).get("communes", {})
+    if target.exists() and not force and prev.get("majLe"):
+        age = (datetime.strptime(now[:10], "%Y-%m-%d") - datetime.strptime(prev["majLe"][:10], "%Y-%m-%d")).days
+        if age < COMMUNES_MAX_AGE_DAYS:
+            LOG.info("Communes : table du %s conservée (%d j)", prev["majLe"][:10], age)
+            return None
+    if source_dir and not all((source_dir / f).exists() for f in COMMUNES_FILES.values()):
+        LOG.info("Communes : fichiers absents de %s, section ignorée", source_dir)
+        return None
+    paths = {}
+    for key, url in COMMUNES_SOURCES.items():
+        p = (source_dir or cache) / COMMUNES_FILES[key]
+        if not source_dir:
+            LOG.info("Téléchargement %s", url)
+            download_file(url, p)
+        paths[key] = p
+    geo = json.loads(paths["geo"].read_text(encoding="utf-8"))
+    doc, stats = build_communes(paths["bv"], paths["circ"], geo, deputes_keys, min_communes=min_communes)
+    write_json(target, doc)
+    LOG.info("Communes : %d reliées (%d partagées entre plusieurs circonscriptions)", stats["communes"], stats["partagees"])
+    return {"majLe": now, **stats}
+
+
 # --------------------------------------------------------------------------- orchestration
 
 def fetch_sources(names: Iterable[str], cache: Path, source_dir: Path | None) -> dict[str, Path]:
@@ -1006,6 +1171,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--fulltext-per-run", type=int, default=int(os.environ.get("FULLTEXT_PER_RUN", 60)))
     ap.add_argument("--no-fulltext", action="store_true")
     ap.add_argument("--all-procedures", action="store_true", help="inclure résolutions, commissions d'enquête…")
+    ap.add_argument("--no-communes", action="store_true", help="ne pas construire la table commune → circonscription")
+    ap.add_argument("--force-communes", action="store_true", help="reconstruire la table des communes même récente")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(message)s")
@@ -1100,6 +1267,17 @@ def main(argv: list[str] | None = None) -> int:
             failures.append("questions")
         else:
             LOG.info("Questions : %d publiées sur %d", len(q_index), sum(q_meta["total"].values()))
+
+    # --- communes → circonscriptions (« retrouver mon député »)
+    if not args.no_communes:
+        try:
+            keys = {(d["numDepartement"], d["circo"]) for d in summaries}
+            c_meta = update_communes(out, args.cache, args.source_dir, keys, meta, now, args.force_communes)
+            if c_meta:
+                meta["sections"]["communes"] = c_meta
+        except Exception:
+            LOG.exception("Échec section communes (table précédente conservée)")
+            failures.append("communes")
 
     # --- députés (écrits en dernier : enrichis par les autres sections)
     # Une section en échec ne doit pas effacer les statistiques de la veille dans les fiches.

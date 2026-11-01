@@ -225,6 +225,103 @@ class StatutsDonneesReellesTest(unittest.TestCase):
         self.assertEqual(i["statut"], "Adopté à l'Assemblée")
 
 
+def _csv(path: Path, header: list, rows: list, encoding="utf-8"):
+    path.write_text("\n".join(";".join(r) for r in [header] + rows) + "\n", encoding=encoding)
+
+
+CAND = ["Nom candidat 1", "Prénom candidat 1", "Voix 1", "Nom candidat 2", "Prénom candidat 2", "Voix 2"]
+
+
+class CommunesTest(unittest.TestCase):
+    """Table commune → circonscription, au format des fichiers officiels des législatives 2024."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = Path(self.tmp.name)
+        # deux circonscriptions dans l'Ain, une en Corse-du-Sud, une à l'étranger, une à Saint-Pierre-et-Miquelon
+        _csv(self.d / "circ.csv", ["Code département", "Libellé département", "Code circonscription législative"] + CAND, [
+            ["01", "Ain", "0101", "DUPONT", "Anne", "10", "MARTIN", "Paul", "8"],
+            ["01", "Ain", "0102", "DURAND", "Léa", "12", "PETIT", "Marc", "9"],
+            ["2A", "Corse-du-Sud", "2A01", "ROSSI", "Jean", "5", "", "", ""],
+            ["ZZ", "Français établis hors de France", "ZZ03", "SMITH", "Eve", "3", "BROWN", "Tom", "2"],
+            ["975", "Saint-Pierre-et-Miquelon", "97501", "LEGASSE", "Yves", "4", "", "", ""],
+        ])
+        bv_head = ["Code département", "Libellé département", "Code commune", "Libellé commune", "Code BV"] + CAND
+        self.bv_rows = [
+            ["01", "Ain", "01001", "L'Abergement-Clémenciat", "0001", "MARTIN", "Paul", "1", "DUPONT", "Anne", "2"],  # ordre différent
+            ["01", "Ain", "01053", "Bourg-en-Bresse", "0001", "DUPONT", "Anne", "1", "MARTIN", "Paul", "2"],
+            ["01", "Ain", "01053", "Bourg-en-Bresse", "0002", "DURAND", "Léa", "1", "PETIT", "Marc", "2"],      # commune partagée
+            ["2A", "Corse-du-Sud", "2A004", "Ajaccio", "0001", "ROSSI", "Jean", "5", "", "", ""],
+            ["ZZ", "Français établis hors de France", "ZZ229", "Londres", "0001", "SMITH", "Eve", "1", "BROWN", "Tom", "1"],
+            ["975", "Saint-Pierre-et-Miquelon", "97502", "Saint-Pierre", "0001", "LEGASSE", "Yves", "4", "", "", ""],
+        ]
+        _csv(self.d / "bv.csv", bv_head, self.bv_rows)
+        self.bv_head = bv_head
+        self.geo = [
+            {"nom": "L'Abergement-Clémenciat", "code": "01001", "codeDepartement": "01", "codesPostaux": ["01400"], "population": 832},
+            {"nom": "Bourg-en-Bresse", "code": "01053", "codeDepartement": "01", "codesPostaux": ["01000"], "population": 41365},
+            {"nom": "Ajaccio", "code": "2A004", "codeDepartement": "2A", "codesPostaux": ["20000", "20090"], "population": 73000},
+            {"nom": "Miquelon-Langlade", "code": "97501", "codeDepartement": "975", "codesPostaux": ["97500"], "population": 580},
+            {"nom": "Commune nouvelle", "code": "01999", "codeDepartement": "01", "codesPostaux": [], "population": 10},
+        ]
+        self.keys = {("01", "1"), ("01", "2"), ("2A", "1"), ("099", "3"), ("975", "1")}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def build(self, **kw):
+        return bd.build_communes(self.d / "bv.csv", self.d / "circ.csv", self.geo, self.keys, min_communes=1, **kw)
+
+    def test_correspondance(self):
+        doc, stats = self.build()
+        c = {l[1]: l for l in doc["c"]}
+        self.assertEqual(c["01001"][4], [1])                      # candidats dans un ordre différent : même circonscription
+        self.assertEqual(c["01053"][4], [1, 2])                   # commune partagée
+        self.assertEqual(c["01053"][2], "01000")
+        self.assertEqual(c["2A004"][3:5], ["2A", [1]])
+        self.assertEqual(c["ZZ229"][3:5], ["099", [3]])           # Français de l'étranger
+        self.assertEqual(c["97501"][3:5], ["975", [1]])           # absente du scrutin, département à circonscription unique
+        self.assertNotIn("01999", c)                              # inconnue et département à plusieurs circonscriptions
+        self.assertEqual(stats["partagees"], 1)
+        self.assertEqual(stats["communesSansCorrespondance"], 1)
+        self.assertEqual(stats["circonscriptionsSansDepute"], 0)
+
+    def test_latin1(self):
+        _csv(self.d / "bv.csv", self.bv_head, self.bv_rows, encoding="latin-1")
+        doc, _ = self.build()
+        self.assertIn("L'Abergement-Clémenciat", {l[0] for l in doc["c"]})
+
+    def test_rapprochement_incomplet(self):
+        rows = self.bv_rows + [["01", "Ain", "01002", "X", "0001", "INCONNU", "Z", "1", "", "", ""]] * 3
+        _csv(self.d / "bv.csv", self.bv_head, rows)
+        with self.assertRaises(RuntimeError):
+            self.build(max_unmatched=2)
+
+    def test_siege_vacant_signale(self):
+        self.keys.discard(("01", "2"))
+        _, stats = self.build()
+        self.assertEqual(stats["circonscriptionsSansDepute"], 1)
+
+    def test_rafraichissement_mensuel(self):
+        out = self.d / "out"
+        out.mkdir()
+        (out / "communes.json").write_text("{}")
+        meta = {"sections": {"communes": {"majLe": "2026-10-20T04:30:00Z"}}}
+        self.assertIsNone(bd.update_communes(out, self.d, None, self.keys, meta, "2026-11-01T04:30:00Z"))  # 12 j : conservée
+        src = self.d / "src"
+        src.mkdir()
+        for k, f in bd.COMMUNES_FILES.items():
+            target = src / f
+            if k == "geo":
+                target.write_text(json.dumps(self.geo), encoding="utf-8")
+            else:
+                target.write_bytes((self.d / f"{k}.csv").read_bytes())
+        meta["sections"]["communes"]["majLe"] = "2026-09-01T04:30:00Z"  # 61 j : reconstruite
+        res = bd.update_communes(out, self.d, src, self.keys, meta, "2026-11-01T04:30:00Z", min_communes=1)
+        self.assertEqual(res["communes"], 6)
+        self.assertEqual(len(json.loads((out / "communes.json").read_text())["c"]), 6)
+
+
 class SanitizerTest(unittest.TestCase):
     def test_strips_attributes_and_dangerous_tags(self):
         out = bd.sanitize_html('<p style="x" onclick="evil()">Bonjour <a href="javascript:x">lien</a></p><style>p{}</style><iframe src=x></iframe>')

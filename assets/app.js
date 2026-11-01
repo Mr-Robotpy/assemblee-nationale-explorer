@@ -21,14 +21,14 @@ const state = {
 const cache = new Map();
 // Listes chargées au démarrage (questions : à la demande). Une liste en échec est notée dans
 // state.failed et affichée « indisponible — réessayer », jamais comme une liste vide.
-const LISTS = { deputes: 'deputes.json', groupes: 'groupes.json', dossiers: 'dossiers.json', scrutins: 'scrutins.json', questions: 'questions.json' };
+const LISTS = { deputes: 'deputes.json', groupes: 'groupes.json', dossiers: 'dossiers.json', scrutins: 'scrutins.json', questions: 'questions.json', communes: 'communes.json' };
 state.failed = {};
 
 async function loadLists(keys) {
     const results = await Promise.allSettled(keys.map((k) => getJSON(LISTS[k])));
     results.forEach((r, i) => {
         const k = keys[i];
-        if (r.status === 'fulfilled') { state[k] = r.value; delete state.failed[k]; }
+        if (r.status === 'fulfilled') { state[k] = r.value; delete state.failed[k]; if (k === 'deputes') state.deputesParCirco = null; }
         else { state[k] = []; state.failed[k] = r.reason && r.reason.message ? r.reason.message : 'erreur réseau'; }
     });
 }
@@ -59,6 +59,8 @@ const HAY = {
     questions: (x) => norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`),
     scrutins: (x) => norm(`${x.titre} ${x.numero} ${x.demandeur}`),
 };
+/** 1 → « 1<sup>re</sup> », 2 → « 2<sup>e</sup> » (circonscriptions). */
+const ordinal = (n) => `${esc(n)}<sup>${String(n) === '1' ? 're' : 'e'}</sup>`;
 const fmtNum = (n) => (n ?? 0).toLocaleString('fr-FR');
 function fmtDate(d, opts = { day: 'numeric', month: 'long', year: 'numeric' }) {
     if (!d) return '—';
@@ -360,6 +362,11 @@ function bindFilters() {
         const b = e.target.closest('[data-retry]');
         if (b && !b.disabled) retry(b.dataset.retry.split(',').filter(Boolean));
     });
+    $('#findDeputyForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const v = $('#findDeputyInput').value.trim();
+        if (v) location.hash = `#/recherche?q=${encodeURIComponent(v)}`;
+    });
     $('#apiRun').addEventListener('click', runApi);
     $('#apiEndpoint').addEventListener('change', () => { $('#apiRaw').href = DATA + $('#apiEndpoint').value; });
     $('#apiCopy').addEventListener('click', () => navigator.clipboard && navigator.clipboard.writeText($('#apiOutput').textContent));
@@ -507,7 +514,7 @@ function renderDeputies() {
                 </div>
             </div>
             <div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/60 text-xs text-slate-500 dark:text-slate-400 space-y-1">
-                <p class="truncate"><i class="fa-solid fa-location-dot w-4"></i>${esc(d.departement)} (${esc(d.numDepartement)}) · ${esc(d.circo)}<sup>e</sup> circ.</p>
+                <p class="truncate"><i class="fa-solid fa-location-dot w-4"></i>${esc(d.departement)} (${esc(d.numDepartement)}) · ${ordinal(d.circo)} circ.</p>
                 <p class="truncate"><i class="fa-solid fa-building-columns w-4"></i>${esc(d.commission ? d.commission.replace(/^Commission (des |de la |de l'|du )?/i, '') : '—')}</p>
             </div>
             <div class="mt-2 flex justify-between items-center text-xs font-medium">
@@ -701,7 +708,7 @@ function searchGroups() {
             complete: true, scope: () => `parmi les ${fmtNum(state.deputes.length)} députés en exercice (liste complète)`,
             render: (d) => `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2.5 flex items-center gap-3">${avatar(d, 'w-9 h-9')}
                 <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
-                <span class="block text-xs text-slate-500 truncate">${esc(d.departement)} (${esc(d.numDepartement)}) · ${esc(d.circo)}<sup>e</sup> circonscription</span></span></a>`,
+                <span class="block text-xs text-slate-500 truncate">${esc(d.departement)} (${esc(d.numDepartement)}) · ${ordinal(d.circo)} circonscription</span></span></a>`,
         },
         {
             key: 'lois', title: 'Lois', icon: 'fa-file-contract', items: state.dossiers, primary: (d) => d.titre,
@@ -733,17 +740,18 @@ function renderSearch(q) {
     const box = $('#searchResults');
     if (!toks.length || toks.join('').length < 2) {
         $('#searchSummary').textContent = '';
-        box.innerHTML = `<div class="col-span-full card text-sm text-slate-500">Tapez au moins deux caractères : un nom (« Panot »), un département (« Gironde », « 33 »), un sujet (« logement », « eau potable »), un ministère…</div>`;
+        box.innerHTML = `<div class="col-span-full card text-sm text-slate-500">Tapez au moins deux caractères : votre commune ou code postal (« Bourg-en-Bresse », « 33000 »), un nom (« Panot »), un département (« Gironde », « 33 »), un sujet (« logement », « eau potable »), un ministère…</div>`;
         // Arrivée sur la page de recherche vide (loupe mobile, lien) : curseur dans le champ.
         if (!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) $('#searchPageInput').focus();
         return;
     }
     if (!state.ready) { box.innerHTML = '<div class="skeleton h-40 col-span-full"></div>'; return; }
-    if (!state.questions.length && !isDown('questions')) {
-        loadQuestions().then(() => { if (lastTab === 'recherche' && (parseHash().params.get('q') || '') === q) renderSearch(q); });
-    }
-    let total = 0;
-    box.innerHTML = searchGroups().map((g) => {
+    const stillHere = () => lastTab === 'recherche' && (parseHash().params.get('q') || '') === q;
+    if (!state.questions.length && !isDown('questions')) loadQuestions().then(() => { if (stillHere()) renderSearch(q); });
+    if (!communeRows() && !isDown('communes')) loadCommunes().then(() => { if (stillHere()) renderSearch(q); });
+    const communes = renderCommunes(q, toks);
+    let total = communes.count;
+    box.innerHTML = communes.html + searchGroups().map((g) => {
         const head = `<div class="flex items-center justify-between gap-2"><h3 class="card-title"><i class="fa-solid ${g.icon} text-blue-600"></i>${g.title}</h3>
             <span class="badge ${g.complete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'}"
                 title="${g.complete ? 'Tous les éléments sont couverts' : 'Seule une partie des archives est publiée sur ce site'}">${g.complete ? 'Données complètes' : 'Sélection publiée'}</span></div>`;
@@ -765,6 +773,75 @@ function renderSearch(q) {
         </div>`;
     }).join('');
     $('#searchSummary').textContent = `${fmtNum(total)} résultat(s) pour « ${q.trim()} »`;
+}
+
+/* ---------------------------------------------------------------- « trouver mon député » par commune
+ * data/communes.json : [nom, code INSEE, codes postaux, département, [circonscriptions], population], construit à partir
+ * des résultats des législatives 2024 par bureau de vote (voir scripts/build_data.py). Chargé à la première recherche. */
+let communesLoading = null;
+let communesNorm = null;
+const COMMUNE_PREVIEW = 3;
+const communeRows = () => (state.communes && Array.isArray(state.communes.c) ? state.communes.c : null);
+
+function loadCommunes() {
+    if (communesLoading) return communesLoading;
+    communesLoading = loadLists(['communes']).then(() => {
+        if (isDown('communes')) { communesLoading = null; return; }
+        communesNorm = communeRows().map((r) => norm(`${r[0]} ${r[3]}`));
+    });
+    return communesLoading;
+}
+
+function deputeParCirco(dept, circ) {
+    if (!state.deputesParCirco || state.deputesParCirco.size === 0) {
+        state.deputesParCirco = new Map(state.deputes.map((d) => [`${d.numDepartement}|${d.circo}`, d]));
+    }
+    return state.deputesParCirco.get(`${dept}|${circ}`);
+}
+
+function renderCommunes(q, toks) {
+    const code = q.trim().replace(/\s+/g, '').toUpperCase();
+    const isCode = /^(\d{5}|2[AB]\d{3})$/.test(code);
+    const rows = communeRows();
+    const wrap = (inner) => `<div class="col-span-full card space-y-3 border-blue-200 dark:border-blue-900">
+        <div class="flex items-center justify-between gap-2"><h3 class="card-title"><i class="fa-solid fa-location-dot text-blue-600"></i>Votre député par commune</h3>
+        <span class="badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" title="Toutes les communes sont couvertes">Données complètes</span></div>${inner}</div>`;
+    if (!rows) {
+        if (!isCode) return { html: '', count: 0 };  // texte libre : on n'affiche rien tant que la table n'est pas là
+        return { html: wrap(isDown('communes') ? unavailable(['communes'], 'Communes') : '<div class="skeleton h-16"></div>'), count: 0 };
+    }
+    let hits;
+    if (isCode) {
+        hits = rows.filter((r) => r[1] === code || r[2].split(' ').includes(code));
+    } else {
+        if (toks.join('').length < 3) return { html: '', count: 0 };
+        const exact = norm(q.trim());
+        hits = rows.map((r, i) => ({ r, n: communesNorm[i] })).filter((h) => matches(h.n, toks))
+            .map((h) => ({ r: h.r, rank: norm(h.r[0]) === exact ? 0 : norm(h.r[0]).startsWith(exact) ? 1 : 2 }))
+            .sort((a, b) => a.rank - b.rank || b.r[5] - a.r[5]).map((h) => h.r);
+    }
+    if (!hits.length) {
+        return isCode ? { html: wrap(`<p class="text-sm text-slate-500">Aucune commune pour le code « ${esc(code)} ».</p>`), count: 0 } : { html: '', count: 0 };
+    }
+    const card = (r) => {
+        const [nom, , cps, dept, circs] = r;
+        const deps = circs.map((c) => ({ c, d: deputeParCirco(dept, String(c)) }));
+        const deptNom = (deps.find((x) => x.d) || {}).d?.departement || dept;
+        return `<div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-700/40 border border-slate-200/60 dark:border-slate-700 space-y-2">
+            <p class="text-sm"><span class="font-bold text-slate-900 dark:text-white">${esc(nom)}</span>
+                <span class="text-slate-500">· ${esc(deptNom)} (${esc(dept)})${cps ? ` · ${esc(cps)}` : ''}</span></p>
+            ${circs.length > 1 ? `<p class="text-xs text-amber-700 dark:text-amber-300"><i class="fa-solid fa-circle-info mr-1"></i>Commune partagée entre ${circs.length} circonscriptions : la vôtre figure sur votre carte électorale.</p>` : ''}
+            <div class="grid sm:grid-cols-2 gap-2">${deps.map(({ c, d }) => (d
+        ? `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2 flex items-center gap-3 bg-white dark:bg-slate-800">${avatar(d, 'w-9 h-9')}
+                <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
+                <span class="block text-xs text-slate-500">${ordinal(c)} circonscription</span></span></a>`
+        : `<p class="text-xs text-slate-500 p-2">${ordinal(c)} circonscription : siège vacant ou député introuvable dans les données.</p>`)).join('')}</div>
+        </div>`;
+    };
+    const more = hits.length > COMMUNE_PREVIEW
+        ? `<p class="text-xs text-slate-500">${fmtNum(hits.length)} communes correspondent : précisez avec le code postal ou le département (ex. « Saint-Denis 93 »).</p>` : '';
+    const scope = `<p class="text-xs text-slate-500">${fmtNum(hits.length)} commune(s) parmi ${fmtNum(rows.length)} — circonscriptions des législatives de 2024, découpage en vigueur.</p>`;
+    return { html: wrap(scope + hits.slice(0, COMMUNE_PREVIEW).map(card).join('') + more), count: hits.length };
 }
 
 /* ---------------------------------------------------------------- détail (modale) */
@@ -815,7 +892,7 @@ function renderDeputeDetail(d) {
         <div class="min-w-0">
             <h3 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">${esc(d.civ)} ${esc(d.prenom)} ${esc(d.nom)}</h3>
             <p class="text-sm text-slate-600 dark:text-slate-300 mt-1">${groupBadge(d.groupe, d.groupeUid)} ${esc(d.groupeLibelle || '')}${d.groupeQualite && !/^membre$/i.test(d.groupeQualite) ? ` · ${esc(d.groupeQualite)}` : ''}</p>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${esc(d.departement)} (${esc(d.numDepartement)}) · ${esc(d.circo)}<sup>e</sup> circonscription · ${esc(d.region || '')}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${esc(d.departement)} (${esc(d.numDepartement)}) · ${ordinal(d.circo)} circonscription · ${esc(d.region || '')}</p>
         </div>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 text-xs">
