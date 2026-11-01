@@ -19,6 +19,29 @@ const state = {
     charts: {},
 };
 const cache = new Map();
+// Listes chargées au démarrage (questions : à la demande). Une liste en échec est notée dans
+// state.failed et affichée « indisponible — réessayer », jamais comme une liste vide.
+const LISTS = { deputes: 'deputes.json', groupes: 'groupes.json', dossiers: 'dossiers.json', scrutins: 'scrutins.json', questions: 'questions.json' };
+state.failed = {};
+
+async function loadLists(keys) {
+    const results = await Promise.allSettled(keys.map((k) => getJSON(LISTS[k])));
+    results.forEach((r, i) => {
+        const k = keys[i];
+        if (r.status === 'fulfilled') { state[k] = r.value; delete state.failed[k]; }
+        else { state[k] = []; state.failed[k] = r.reason && r.reason.message ? r.reason.message : 'erreur réseau'; }
+    });
+}
+
+function unavailable(keys, label) {
+    const ks = keys.filter((k) => state.failed[k]);
+    return `<div class="col-span-full card text-center space-y-3 border-amber-300 dark:border-amber-700">
+        <p class="text-sm font-semibold text-amber-700 dark:text-amber-300"><i class="fa-solid fa-plug-circle-xmark mr-1"></i>${esc(label)} : données indisponibles</p>
+        <p class="text-xs text-slate-500">Le chargement a échoué (${esc(ks.map((k) => state.failed[k]).join(' ; '))}). Il ne s'agit pas d'une absence de résultats.</p>
+        <button class="btn-secondary" data-retry="${esc(ks.join(','))}"><i class="fa-solid fa-rotate-right"></i>Réessayer</button>
+    </div>`;
+}
+const isDown = (...keys) => keys.some((k) => state.failed[k]);
 let markReady;
 const dataReady = new Promise((r) => { markReady = r; });
 
@@ -117,7 +140,11 @@ async function init() {
     try {
         meta = await getJSON('meta.json');
     } catch (e) {
-        showGlobalError(`Les données n'ont pas encore été générées (${esc(e.message)}). Lancez le workflow « Mise à jour des données » dans l'onglet Actions du dépôt, ou en local : <code>python scripts/build_data.py</code>.`);
+        if (/^404/.test(e.message)) {
+            showGlobalError(`Les données n'ont pas encore été générées. Lancez le workflow « Mise à jour des données » dans l'onglet Actions du dépôt, ou en local : <code>python scripts/build_data.py</code>.`);
+        } else {
+            showGlobalError(`Données indisponibles (${esc(e.message)}) : problème de connexion ou serveur momentanément injoignable. <button class="underline font-semibold" onclick="location.reload()">Réessayer</button>`);
+        }
         markReady();
         return;
     }
@@ -131,20 +158,30 @@ async function init() {
         showGlobalError(`Dernière mise à jour partielle : section(s) ${esc(meta.echecs.join(', '))} non rafraîchie(s), données précédentes affichées.`);
     }
 
-    const results = await Promise.allSettled([
-        getJSON('deputes.json'), getJSON('groupes.json'), getJSON('dossiers.json'), getJSON('scrutins.json'),
-    ]);
-    const [dep, grp, dos, scr] = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
-    Object.assign(state, { deputes: dep, groupes: grp, dossiers: dos, scrutins: scr, ready: true });
+    await loadLists(['deputes', 'groupes', 'dossiers', 'scrutins']);
+    state.ready = true;
     markReady();
+    renderAll();
+    if (lastTab === 'questions') loadQuestions();
+}
 
+function renderAll() {
     fillFilterOptions();
     renderDashboard();
     renderDeputies();
     renderBills();
     renderScrutins();
+    if (state.questions.length || isDown('questions')) renderQuestions();
     renderMeta();
-    if (lastTab === 'questions') loadQuestions();
+}
+
+async function retry(keys) {
+    keys = [...new Set([...keys, ...Object.keys(state.failed)])];  // un clic relance toutes les listes en échec
+    keys.forEach((k) => cache.delete(LISTS[k]));
+    if (keys.includes('questions')) questionsLoading = null;
+    document.querySelectorAll('[data-retry]').forEach((b) => { b.disabled = true; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>Chargement…'; });
+    await loadLists(keys);
+    renderAll();
 }
 
 function showGlobalError(html) {
@@ -187,6 +224,10 @@ function bindFilters() {
         if (b) document.getElementById(b.dataset.toggle).classList.toggle('hidden');
     });
 
+    document.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-retry]');
+        if (b && !b.disabled) retry(b.dataset.retry.split(',').filter(Boolean));
+    });
     $('#apiRun').addEventListener('click', runApi);
     $('#apiEndpoint').addEventListener('change', () => { $('#apiRaw').href = DATA + $('#apiEndpoint').value; });
     $('#apiCopy').addEventListener('click', () => navigator.clipboard && navigator.clipboard.writeText($('#apiOutput').textContent));
@@ -198,11 +239,16 @@ function toggleChips(selector, active) {
 
 function fillFilterOptions() {
     const gsel = $('#filterGroup');
+    const gval = gsel.value, cval = $('#filterCommission').value;
+    gsel.length = 1;
+    $('#filterCommission').length = 1;
     state.groupes.forEach((g) => gsel.insertAdjacentHTML('beforeend', `<option value="${esc(g.uid)}">${esc(g.libelle)} (${esc(g.abrev)}) · ${g.sieges}</option>`));
     const coms = [...new Set(state.deputes.map((d) => d.commission).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
     const csel = $('#filterCommission');
     coms.forEach((c) => csel.insertAdjacentHTML('beforeend', `<option value="${esc(c)}">${esc(c.replace(/^Commission (des |de la |de l'|du )?/i, ''))}</option>`));
     if (state.dossiers.some((d) => d.categorie === 'AUTRE')) document.querySelector('[data-cat="AUTRE"]').classList.remove('hidden');
+    gsel.value = gval;
+    csel.value = cval;
 }
 
 /* ---------------------------------------------------------------- tableau de bord */
@@ -223,16 +269,18 @@ function renderDashboard() {
             </div>
             <div class="w-11 h-11 shrink-0 rounded-xl ${color} flex items-center justify-center text-lg"><i class="fa-solid ${icon}"></i></div>
         </div>`;
+    const depDown = isDown('deputes');
     $('#kpis').innerHTML = [
-        kpi('Députés en exercice', fmtNum(nbDep), `${state.groupes.length} groupes`, 'fa-user-tie', 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'),
-        kpi('Femmes', nbDep ? pct((100 * femmes / nbDep).toFixed(1)) : '—', `${fmtNum(femmes)} députées · ${fmtNum(nbDep - femmes)} députés`, 'fa-venus-mars', 'bg-purple-50 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400'),
+        kpi('Députés en exercice', depDown ? '—' : fmtNum(nbDep), depDown ? 'indisponible' : `${state.groupes.length} groupes`, 'fa-user-tie', 'bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'),
+        kpi('Femmes', !depDown && nbDep ? pct((100 * femmes / nbDep).toFixed(1)) : '—', depDown ? 'indisponible' : `${fmtNum(femmes)} députées · ${fmtNum(nbDep - femmes)} députés`, 'fa-venus-mars', 'bg-purple-50 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400'),
         kpi('Lois promulguées', fmtNum(prom), `${fmtNum((dosTotal.PJL || 0) + (dosTotal.PPL || 0))} dossiers de loi ouverts`, 'fa-gavel', 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400'),
         kpi('Questions posées', fmtNum(qTotal), `${qTotal ? pct((100 * qRep / qTotal).toFixed(1)) : '—'} avec réponse`, 'fa-comments', 'bg-amber-50 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400'),
     ].join('');
     $('#majorityLabel').textContent = nbDep ? `Majorité absolue : ${Math.floor(nbDep / 2) + 1} sièges` : '';
 
-    $('#dashScrutins').innerHTML = state.scrutins.slice(0, 5).map(scrutinMini).join('') || '<p class="text-xs text-slate-500">Aucun scrutin.</p>';
-    $('#dashDossiers').innerHTML = state.dossiers.slice(0, 5).map((d) => `
+    $('#dashScrutins').innerHTML = isDown('scrutins') ? unavailable(['scrutins'], 'Scrutins')
+        : state.scrutins.slice(0, 5).map(scrutinMini).join('') || '<p class="text-xs text-slate-500">Aucun scrutin.</p>';
+    $('#dashDossiers').innerHTML = isDown('dossiers') ? unavailable(['dossiers'], 'Textes') : state.dossiers.slice(0, 5).map((d) => `
         <a href="#/dossier/${esc(d.uid)}" class="row-link">
             <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1 gap-2">
                 <span>${esc(d.procedure || '')}</span><span>${fmtShort(d.dateMaj)}</span>
@@ -263,7 +311,15 @@ function renderCharts() {
     const grid = dark ? 'rgba(148,163,184,.15)' : 'rgba(148,163,184,.3)';
     Object.values(state.charts).forEach((c) => c.destroy());
 
-    const g = state.groupes;
+    const chartDown = isDown('deputes', 'groupes');
+    ['#chartGroups', '#chartGender'].forEach((id) => {
+        const box = $(id).parentElement;
+        const msg = box.querySelector('.chart-down');
+        if (chartDown && !msg) { box.insertAdjacentHTML('beforeend', '<p class="chart-down absolute inset-0 flex items-center justify-center text-center text-xs text-amber-700 dark:text-amber-300">Données indisponibles — bouton « Réessayer » dans l\'onglet Députés</p>'); }
+        if (!chartDown && msg) msg.remove();
+    });
+    state.charts = {};
+    const g = chartDown ? [] : state.groupes;
     state.charts.groups = new Chart($('#chartGroups'), {
         type: 'bar',
         data: { labels: g.map((x) => x.abrev), datasets: [{ label: 'Sièges', data: g.map((x) => x.sieges), backgroundColor: g.map((x) => x.couleur), borderRadius: 6 }] },
@@ -274,7 +330,7 @@ function renderCharts() {
         },
     });
     const f = state.deputes.filter((d) => d.sexe === 'F').length;
-    state.charts.gender = new Chart($('#chartGender'), {
+    if (!chartDown) state.charts.gender = new Chart($('#chartGender'), {
         type: 'doughnut',
         data: { labels: ['Femmes', 'Hommes'], datasets: [{ data: [f, state.deputes.length - f], backgroundColor: ['#EC4899', '#3B82F6'], borderWidth: 0 }] },
         options: { responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: { legend: { position: 'bottom' } } },
@@ -304,9 +360,10 @@ function filteredDeputies() {
 }
 
 function renderDeputies() {
+    const grid = $('#deputiesGrid');
+    if (isDown('deputes')) { $('#deputesCount').textContent = 'Données indisponibles'; grid.innerHTML = unavailable(['deputes', 'groupes'], 'Annuaire des députés'); moreButton('#deputiesMore', 0, 0); return; }
     const list = filteredDeputies();
     $('#deputesCount').textContent = `${fmtNum(list.length)} député·e·s sur ${fmtNum(state.deputes.length)}`;
-    const grid = $('#deputiesGrid');
     if (!list.length) { grid.innerHTML = emptyState('Aucun député ne correspond à ces critères.'); moreButton('#deputiesMore', 0, 0); return; }
     grid.innerHTML = list.slice(0, state.shown.deputes).map((d) => `
         <a href="#/depute/${esc(d.uid)}" class="card !p-4 hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 transition flex flex-col justify-between">
@@ -344,8 +401,8 @@ function stepper(step) {
     </div>`;
 }
 
-function statusBadge(statut, etape) {
-    const s = norm(statut);
+function statusBadge(statut, etape, decision) {
+    const s = norm(decision || statut);
     const cls = etape === 5 || s.startsWith('adopt') ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
         : s.startsWith('rejet') ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
             : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
@@ -353,6 +410,7 @@ function statusBadge(statut, etape) {
 }
 
 function renderBills() {
+    if (isDown('dossiers')) { $('#loisCount').textContent = 'Données indisponibles'; $('#billsList').innerHTML = unavailable(['dossiers'], 'Projets et propositions de loi'); moreButton('#billsMore', 0, 0); return; }
     const list = filteredBills();
     $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés — tous les projets de loi, et les propositions les plus récemment actives`;
     const el = $('#billsList');
@@ -361,16 +419,17 @@ function renderBills() {
         <a href="#/dossier/${esc(d.uid)}" class="card block hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 transition space-y-2">
             <div class="flex flex-wrap items-center gap-2 text-xs">
                 <span class="badge ${d.categorie === 'PJL' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}">${esc(d.procedure)}</span>
-                ${statusBadge(d.statut, d.etape)}
+                ${statusBadge(d.statut, d.etape, d.statutDecision)}
                 ${d.procedureAcceleree ? '<span class="badge bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">Procédure accélérée</span>' : ''}
                 ${d.texteIntegral ? '<span class="badge bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"><i class="fa-solid fa-file-lines mr-1"></i>Texte intégral</span>' : ''}
-                <span class="ml-auto text-slate-500"><i class="fa-regular fa-calendar mr-1"></i>${fmtShort(d.dateMaj)}</span>
+                <span class="ml-auto text-slate-500" title="Dernière étape accomplie"><i class="fa-regular fa-calendar mr-1"></i>${fmtShort(d.dateMaj)}</span>
             </div>
             <h3 class="text-base font-bold text-slate-900 dark:text-white">${esc(d.titre)}</h3>
             ${d.resume && norm(d.resume) !== norm(d.titre) ? `<p class="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">${esc(d.resume)}</p>` : ''}
             <p class="text-xs text-slate-500 dark:text-slate-400">${esc((d.initiateurs || []).join(', '))}${d.nbInitiateurs > 3 ? ` et ${d.nbInitiateurs - 3} autre(s)` : ''}</p>
             <div class="pt-1 space-y-1">
-                <div class="flex justify-between text-xs"><span class="text-blue-600 dark:text-blue-400 truncate pr-2">${esc(d.derniereEtape || '')}</span><span class="text-slate-500 shrink-0">${esc(STEP_LABELS[d.etape - 1])}</span></div>
+                <div class="flex justify-between text-xs"><span class="text-blue-600 dark:text-blue-400 truncate pr-2" title="Dernière étape accomplie">${esc(d.derniereEtape || '')}</span><span class="text-slate-500 shrink-0">${esc(STEP_LABELS[d.etape - 1])}</span></div>
+                ${d.prochaineEtape ? `<p class="text-xs text-amber-700 dark:text-amber-300"><i class="fa-regular fa-calendar-check mr-1"></i>Prévu le ${fmtShort(d.prochaineEtape.date)} : ${esc(d.prochaineEtape.libelle)}</p>` : ''}
                 ${stepper(d.etape)}
             </div>
         </a>`).join('');
@@ -383,10 +442,11 @@ let questionsLoading = null;
 function loadQuestions() {
     if (questionsLoading) return questionsLoading;
     $('#questionsContainer').innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton h-20 w-full"></div>').join('');
-    questionsLoading = getJSON('questions.json')
-        .then((q) => { state.questions = q; })
-        .catch((e) => { questionsLoading = null; showGlobalError(`Questions indisponibles (${esc(e.message)}).`); })
-        .finally(() => { renderQuestions(); renderMeta(); });
+    questionsLoading = loadLists(['questions']).then(() => {
+        if (isDown('questions')) questionsLoading = null;
+        renderQuestions();
+        renderMeta();
+    });
     return questionsLoading;
 }
 
@@ -399,6 +459,7 @@ function filteredQuestions() {
 }
 
 function renderQuestions() {
+    if (isDown('questions')) { $('#questionsCount').textContent = 'Données indisponibles'; $('#questionsContainer').innerHTML = unavailable(['questions'], 'Questions'); moreButton('#questionsMore', 0, 0); return; }
     const list = filteredQuestions();
     const tot = (state.meta && state.meta.sections.questions && state.meta.sections.questions.total) || {};
     const total = Object.values(tot).reduce((a, b) => a + b, 0);
@@ -426,6 +487,7 @@ function renderQuestions() {
 
 /* ---------------------------------------------------------------- scrutins */
 function renderScrutins() {
+    if (isDown('scrutins')) { $('#scrutinsCount').textContent = 'Données indisponibles'; $('#scrutinsList').innerHTML = unavailable(['scrutins'], 'Scrutins'); moreButton('#scrutinsMore', 0, 0); return; }
     const q = norm($('#scrutinSearch').value.trim());
     const list = state.scrutins.filter((s) => !q || norm(`${s.titre} ${s.numero} ${s.demandeur}`).includes(q));
     const sec = (state.meta && state.meta.sections.scrutins) || {};
@@ -564,7 +626,7 @@ function renderDossierDetail(d) {
     <div class="pr-8 space-y-2">
         <div class="flex flex-wrap items-center gap-2 text-xs">
             <span class="badge bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300">${esc(d.procedure)}</span>
-            ${statusBadge(d.statut, d.etape)}
+            ${statusBadge(d.statut, d.etape, d.statutDecision)}
             ${d.procedureAcceleree ? '<span class="badge bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">Procédure accélérée</span>' : ''}
             <span class="font-mono text-slate-400">${esc(d.uid)}</span>
         </div>
@@ -576,9 +638,11 @@ function renderDossierDetail(d) {
         ${STEP_LABELS.map((l, i) => `<div class="p-1.5 rounded ${i < d.etape ? (d.etape === 5 ? 'bg-emerald-500 text-white' : 'bg-blue-600 text-white') : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}">${esc(l)}</div>`).join('')}
     </div>
     <div class="grid sm:grid-cols-3 gap-3 mt-4 text-xs">
-        <div class="stat"><span class="stat-label">Dépôt</span><span class="stat-value">${fmtDate(d.dateDepot)}</span></div>
-        <div class="stat"><span class="stat-label">Dernière activité</span><span class="stat-value">${fmtDate(d.dateMaj)}</span></div>
-        <div class="stat"><span class="stat-label">Où en est le texte ?</span><span class="stat-value">${esc(d.derniereEtape || '—')}</span></div>
+        <div class="stat"><span class="stat-label">Dernière étape accomplie</span><span class="stat-value">${fmtDate(d.dateMaj)}</span><span class="block text-slate-500">${esc(d.derniereEtape || '—')}</span></div>
+        <div class="stat ${d.prochaineEtape ? 'ring-1 ring-amber-300 dark:ring-amber-700' : ''}"><span class="stat-label">Prochaine étape prévue</span>${d.prochaineEtape
+        ? `<span class="stat-value">${fmtDate(d.prochaineEtape.date)}</span><span class="block text-slate-500">${esc(d.prochaineEtape.libelle)}</span>`
+        : '<span class="stat-value">Aucune inscrite à l\'agenda</span>'}</div>
+        <div class="stat"><span class="stat-label">Dépôt · données</span><span class="stat-value">${fmtDate(d.dateDepot)}</span><span class="block text-slate-500">Données de l'AN récupérées le ${fmtDate(d.donneesDu)}</span></div>
     </div>
 
     <h4 class="section-title">Texte ${principal ? `— ${esc(principal.type || '')}` : ''}</h4>
@@ -595,9 +659,10 @@ function renderDossierDetail(d) {
             <p class="text-xs font-bold text-blue-700 dark:text-blue-300 mb-1">${esc(p.name)}</p>
             <ul class="border-l-2 border-slate-200 dark:border-slate-700 pl-4 space-y-2">${p.actes.map((a) => `
                 <li class="relative text-xs">
-                    <span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full ${a.statut ? 'bg-emerald-500' : 'bg-blue-500'}"></span>
+                    <span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full ${a.prevu ? 'bg-white dark:bg-slate-800 border-2 border-amber-500' : a.statut ? 'bg-emerald-500' : 'bg-blue-500'}"></span>
                     <span class="text-slate-500">${a.date ? fmtShort(a.date) : '—'}</span>
-                    <span class="font-semibold text-slate-800 dark:text-slate-100"> ${esc(a.libelle)}</span>
+                    <span class="font-semibold ${a.prevu ? 'text-slate-500 dark:text-slate-400 italic' : 'text-slate-800 dark:text-slate-100'}"> ${esc(a.libelle)}</span>
+                    ${a.prevu ? '<span class="badge ml-1 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Programmé</span>' : ''}
                     ${a.statut ? `<span class="ml-1">${statusBadge(a.statut)}</span>` : ''}
                     ${a.organe ? `<span class="block text-slate-500">${esc(a.organe)}</span>` : ''}
                     ${a.rapporteurs && a.rapporteurs.length ? `<span class="block text-slate-500">Rapporteur(s) : ${esc(a.rapporteurs.join(', '))}</span>` : ''}

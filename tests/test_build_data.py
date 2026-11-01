@@ -81,7 +81,8 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(d["categorie"], "PJL")
         self.assertEqual(d["textePrincipal"], "PRJLANR5L17B0004")
         self.assertEqual(d["etape"], 4)  # passé au Sénat
-        self.assertEqual(d["statut"], "Rejeté")
+        # Une réunion de 1re lecture AN datée après le rejet au Sénat n'ouvre pas une nouvelle lecture.
+        self.assertEqual(d["statut"], "Rejeté au Sénat")
         self.assertTrue(any(a["scrutins"] == ["VTANR5L17V5"] for a in d["actes"]))
         self.assertTrue(any(doc["uid"] == "PRJLANR5L17B0004" and doc["titre"] for doc in d["documents"]))
 
@@ -114,6 +115,74 @@ class ProjetsDeLoiTest(unittest.TestCase):
             index, _, _ = bd.build_dossiers(z, bd.Referentiel(), 1, {"PJL", "PPL", "AUTRE"})
             self.assertEqual([d["uid"] for d in index], ["DLR5L17N50173"])
             self.assertEqual(index[0]["initiateurs"], ["Gouvernement"])
+
+
+def _acte(code, date=None, statut=None, children=None):
+    a = {"codeActe": code, "libelleActe": {"nomCanonique": code}, "dateActe": date and f"{date}T00:00:00.000+02:00",
+         "actesLegislatifs": {"acteLegislatif": children} if children else None}
+    if statut:
+        a["statutConclusion"] = {"libelle": statut}
+    return a
+
+
+def _dossier_zip(tmp: Path, actes: list) -> Path:
+    d = {"dossierParlementaire": {"uid": "DLR5L17NTEST", "titreDossier": {"titre": "Logement"},
+                                  "procedureParlementaire": {"libelle": "Projet de loi ordinaire"},
+                                  "actesLegislatifs": {"acteLegislatif": actes}}}
+    z = tmp / "d.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("json/dossierParlementaire/DLR5L17NTEST.json", json.dumps(d))
+    return z
+
+
+class EtapesProgrammeesTest(unittest.TestCase):
+    """Cas réel signalé : adoption au Sénat le 08/07, nouvelle lecture AN ouverte, séance programmée le 20/11."""
+
+    ACTES = [
+        _acte("AN1", children=[_acte("AN1-DEPOT", "2026-01-10"), _acte("AN1-DEBATS-DEC", "2026-03-02", "adopté")]),
+        _acte("SN1", children=[_acte("SN1-DEPOT", "2026-03-03"), _acte("SN1-DEBATS-DEC", "2026-07-08", "adopté")]),
+        _acte("ANNLEC", children=[_acte("ANNLEC-DEPOT", "2026-07-10"), _acte("ANNLEC-DEBATS-SEANCE", "2026-11-20")]),
+    ]
+
+    def build(self, actes, today="2026-11-01"):
+        with tempfile.TemporaryDirectory() as t:
+            index, by_uid, _ = bd.build_dossiers(_dossier_zip(Path(t), actes), bd.Referentiel(), 10, {"PJL"}, today=today)
+            return index[0], by_uid["DLR5L17NTEST"]
+
+    def test_date_future_pas_derniere_activite(self):
+        i, d = self.build(self.ACTES)
+        self.assertEqual(i["dateMaj"], "2026-07-10")
+        self.assertEqual(i["derniereEtape"], "Nouvelle lecture — Assemblée · ANNLEC-DEPOT")
+        self.assertEqual(i["prochaineEtape"]["date"], "2026-11-20")
+        self.assertEqual([a["prevu"] for a in d["actes"] if a["date"] == "2026-11-20"], [True])
+        self.assertEqual(d["donneesDu"], "2026-11-01")
+
+    def test_statut_contextualise(self):
+        i, _ = self.build(self.ACTES)
+        self.assertEqual(i["statut"], "Adopté au Sénat — examen à l'Assemblée en cours")
+        self.assertEqual(i["statutDecision"], "adopté")
+
+    def test_lecture_seulement_programmee(self):
+        actes = self.ACTES[:2] + [_acte("ANNLEC", children=[_acte("ANNLEC-DEBATS-SEANCE", "2026-11-20")])]
+        i, _ = self.build(actes)
+        self.assertEqual(i["dateMaj"], "2026-07-08")
+        self.assertEqual(i["statut"], "Adopté au Sénat — examen à l'Assemblée en cours")
+
+    def test_etape_ne_compte_pas_le_futur(self):
+        actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-10-01"), _acte("AN1-DEBATS-SEANCE", "2026-11-20")])]
+        i, _ = self.build(actes)
+        self.assertEqual(i["etape"], 1)
+        self.assertEqual(i["statut"], "Déposé")
+
+    def test_seance_du_jour_programmee_decision_du_jour_accomplie(self):
+        actes = [_acte("AN1", children=[_acte("AN1-DEPOT", "2026-09-01"), _acte("AN1-DEBATS-SEANCE", "2026-11-01"),
+                                        _acte("AN1-DEBATS-DEC", "2026-11-01", "adopté")])]
+        _, d = self.build(actes)
+        self.assertEqual({a["code"]: a["prevu"] for a in d["actes"]}["AN1-DEBATS-SEANCE"], False)
+        self.assertEqual(d["statut"], "Adopté à l'Assemblée")
+        actes[0]["actesLegislatifs"]["acteLegislatif"].pop()  # sans décision publiée : séance du jour = programmée
+        _, d = self.build(actes)
+        self.assertEqual({a["code"]: a["prevu"] for a in d["actes"]}["AN1-DEBATS-SEANCE"], True)
 
 
 class SanitizerTest(unittest.TestCase):

@@ -596,6 +596,41 @@ def _step(codes: set[str]) -> int:
     return 1
 
 
+CHAMBRES = {"AN": "à l'Assemblée", "SN": "au Sénat", "CMP": "en commission mixte paritaire",
+            "CC": "au Conseil constitutionnel"}
+
+
+def _chambre(code: str) -> str | None:
+    for prefix in ("CMP", "CC", "AN", "SN"):  # CMP/CC avant AN/SN (préfixes plus longs d'abord)
+        if code.startswith(prefix):
+            return prefix
+    return None
+
+
+def _statut_contextualise(decision: dict | None, realises: list[dict], prochaine: dict | None,
+                          debut_phase: dict[str, str] | None = None) -> str:
+    """« Adopté au Sénat — examen à l'Assemblée en cours » plutôt qu'un « Adopté » sans contexte."""
+    courant = realises[-1] if realises else None
+    if decision is None:
+        lieu = CHAMBRES.get(_chambre(courant["code"]) if courant else "", "")
+        return f"En cours d'examen {lieu}".strip() if courant and len(realises) > 1 else "Déposé"
+    statut = decision["statut"].strip()
+    statut = statut[0].upper() + statut[1:]
+    ch = _chambre(decision["code"])
+    label = f"{statut} {CHAMBRES[ch]}" if ch in CHAMBRES else statut
+    # L'examen continue-t-il ? Seulement si une NOUVELLE lecture s'est ouverte après la décision
+    # (une réunion tardive rattachée à une lecture antérieure ne compte pas).
+    debut_phase = debut_phase or {}
+
+    def nouvelle_lecture(a: dict | None) -> bool:
+        return bool(a) and a["phase"] != decision["phase"] and debut_phase.get(a["phase"], "") >= decision["date"]
+
+    suite = courant if nouvelle_lecture(courant) else (prochaine if nouvelle_lecture(prochaine) else None)
+    if suite and _chambre(suite["code"]) in ("AN", "SN"):
+        label += f" — examen {CHAMBRES[_chambre(suite['code'])]} en cours"
+    return label
+
+
 def _doc_links(uid: str) -> dict:
     if "ANR5" not in uid:
         return {}
@@ -640,7 +675,11 @@ def _flatten_actes(node: Any, phase: str | None, ref: Referentiel, acc: list[dic
             _flatten_actes(children, this_phase, ref, acc)
 
 
-def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: set[str]) -> tuple[list[dict], dict[str, dict], dict]:
+def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: set[str],
+                   today: str | None = None) -> tuple[list[dict], dict[str, dict], dict]:
+    """`today` (AAAA-MM-JJ, défaut : date UTC du jour) sépare les actes accomplis des actes programmés :
+    l'agenda publié par l'AN contient des séances futures, qui ne sont pas une « dernière activité »."""
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     dossiers: list[dict] = []
     documents: dict[str, dict] = {}
     for name, obj in iter_zip_json(path):
@@ -683,13 +722,21 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
         stats[cat] += 1
         actes: list[dict] = []
         _flatten_actes(d.get("actesLegislatifs"), None, ref, actes)
-        codes = {a["code"] for a in actes}
+        # Accompli : date passée. Date du jour : accompli seulement si la décision de cette lecture est déjà
+        # publiée (sinon la séance n'a peut-être pas encore eu lieu à l'heure de la génération). Futur : programmé.
+        decide_ce_jour = {a["phase"] for a in actes if a["date"] == today and a["statut"]}
+        for a in actes:
+            a["prevu"] = bool(a["date"]) and (a["date"] > today or (a["date"] == today and a["phase"] not in decide_ce_jour))
+        dated = sorted((a for a in actes if a["date"]), key=lambda a: a["date"])
+        realises = [a for a in dated if not a["prevu"]]
+        prevus = [a for a in dated if a["prevu"]]
+        phases_ouvertes = {a["phase"] for a in realises}
+        # actes non datés (nominations…) : comptés seulement si leur lecture a déjà commencé
+        codes = {a["code"] for a in realises} | {a["code"] for a in actes if not a["date"] and a["phase"] in phases_ouvertes}
         if any(c.startswith("PROM") for c in codes):
             stats[f"{cat}_promulgues"] += 1
         if cat not in categories:
             continue
-        dated = [a for a in actes if a["date"]]
-        dated.sort(key=lambda a: a["date"])
         initiateurs = [ref.name(txt(x.get("acteurRef"))) or txt(x.get("acteurRef"))
                        for x in as_list(get(d, "initiateur", "acteurs", "acteur")) if isinstance(x, dict)]
         initiateurs += [ref.organe_label(txt(x.get("organeRef"))) or txt(x.get("organeRef"))
@@ -711,9 +758,13 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
             docs.append({k: meta.get(k) for k in ("uid", "titre", "type", "date", "auteurs")} | {"liens": _doc_links(t)})
         depot = next((a for a in actes if a["code"].endswith("-DEPOT") and a["textes"]), None)
         texte_principal = depot["textes"][0] if depot else (texte_ids[0] if texte_ids else None)
-        last = dated[-1] if dated else None
-        promulgue = next((a for a in actes if a["code"].startswith("PROM")), None)
-        last_status = next((a for a in reversed(dated) if a["statut"]), None)
+        last = realises[-1] if realises else None
+        prochaine = prevus[0] if prevus else None
+        promulgue = next((a for a in realises if a["code"].startswith("PROM")), None)
+        decision = next((a for a in reversed(realises) if a["statut"]), None)
+        debut_phase: dict[str, str] = {}
+        for a in dated:
+            debut_phase.setdefault(a["phase"], a["date"])
         principal_meta = documents.get(texte_principal or "", {})
         titre_chemin = txt(get(d, "titreDossier", "titreChemin"))
         built.append({
@@ -727,7 +778,11 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
             "dateMaj": last["date"] if last else None,
             "etape": _step(codes),
             "derniereEtape": (f"{last['phase']} · {last['libelle']}" if last else None),
-            "statut": ("Promulguée" if promulgue else (last_status["statut"].capitalize() if last_status else "En cours")),
+            "prochaineEtape": ({"date": prochaine["date"], "libelle": f"{prochaine['phase']} · {prochaine['libelle']}"}
+                               if prochaine else None),
+            "statut": ("Promulguée" if promulgue else _statut_contextualise(decision, realises, prochaine, debut_phase)),
+            "statutDecision": (decision["statut"] if decision and not promulgue else None),
+            "donneesDu": today,
             "procedureAcceleree": any(c.endswith("-PROCACC") for c in codes),
             "textePrincipal": texte_principal,
             "resume": principal_meta.get("titreLong"),
@@ -748,7 +803,8 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
     keep = {b["uid"] for b in projets + autres}
     built = [b for b in built if b["uid"] in keep]
     index = [{k: b[k] for k in ("uid", "titre", "procedure", "categorie", "initiateurs", "nbInitiateurs", "dateDepot",
-                                 "dateMaj", "etape", "derniereEtape", "statut", "procedureAcceleree", "resume")}
+                                 "dateMaj", "etape", "derniereEtape", "prochaineEtape", "statut", "statutDecision",
+                                 "procedureAcceleree", "resume")}
              for b in built]
     for i in index:
         i["initiateurs"] = i["initiateurs"][:3]
