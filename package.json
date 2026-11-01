@@ -1,12 +1,16 @@
 {
   "name": "assemblee-nationale-explorer",
   "private": true,
-  "description": "Front statique : compilation de la feuille de style Tailwind",
+  "description": "Front statique : feuille de style Tailwind et ressources tierces hébergées sur le site",
   "scripts": {
     "build:css": "tailwindcss -i assets/tailwind.src.css -o assets/app.css --minify",
-    "watch:css": "tailwindcss -i assets/tailwind.src.css -o assets/app.css --watch"
+    "watch:css": "tailwindcss -i assets/tailwind.src.css -o assets/app.css --watch",
+    "vendor": "python3 scripts/vendor_assets.py"
   },
   "devDependencies": {
+    "@fontsource/inter": "5.0.18",
+    "@fortawesome/fontawesome-free": "6.4.0",
+    "chart.js": "4.4.1",
     "tailwindcss": "3.4.17"
   }
 }
