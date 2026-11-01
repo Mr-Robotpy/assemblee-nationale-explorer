@@ -172,9 +172,15 @@
                 <button data-status="cours" class="chip">En cours</button>
                 <button data-status="prom" class="chip">Promulguées</button>
             </div>
-            <div class="grid grid-cols-5 gap-1 text-center text-[10px] sm:text-xs pt-2">
-                <div class="step-legend">1. Dépôt</div><div class="step-legend">2. Commission</div><div class="step-legend">3. Séance</div>
-                <div class="step-legend">4. Navette / Sénat</div><div class="step-legend">5. Promulgation</div>
+            <div>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400 mb-1">Étape atteinte <span class="hidden sm:inline">— cliquez pour filtrer, cliquez à nouveau pour tout afficher</span></p>
+                <div id="loiStepFilter" class="grid grid-cols-5 gap-1 text-center text-[10px] sm:text-xs" role="group" aria-label="Filtrer par étape atteinte">
+                    <button data-step="1" class="step-legend" aria-pressed="false">1. Dépôt<span class="step-count"></span></button>
+                    <button data-step="2" class="step-legend" aria-pressed="false">2. Commission<span class="step-count"></span></button>
+                    <button data-step="3" class="step-legend" aria-pressed="false">3. Séance<span class="step-count"></span></button>
+                    <button data-step="4" class="step-legend" aria-pressed="false">4. Navette / Sénat<span class="step-count"></span></button>
+                    <button data-step="5" class="step-legend" aria-pressed="false">5. Promulgation<span class="step-count"></span></button>
+                </div>
             </div>
         </div>
         <div id="billsList" class="space-y-3"></div>
