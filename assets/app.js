@@ -49,6 +49,16 @@ const dataReady = new Promise((r) => { markReady = r; });
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+/* Correspondance de recherche commune aux listes et à la recherche globale : chaque mot de la requête
+ * (sans accents ni casse) doit apparaître, dans n'importe quel ordre. Mêmes champs que les listes. */
+const tokens = (q) => norm(q).split(/[\s'’,;:.!?()«»"-]+/).filter((t) => t.length > 0);
+const matches = (hay, toks) => toks.every((t) => hay.includes(t));
+const HAY = {
+    deputes: (d) => norm(`${d.prenom} ${d.nom} ${d.departement} ${d.numDepartement} ${d.groupe} ${d.circo}e circonscription`),
+    lois: (d) => norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`),
+    questions: (x) => norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`),
+    scrutins: (x) => norm(`${x.titre} ${x.numero} ${x.demandeur}`),
+};
 const fmtNum = (n) => (n ?? 0).toLocaleString('fr-FR');
 function fmtDate(d, opts = { day: 'numeric', month: 'long', year: 'numeric' }) {
     if (!d) return '—';
@@ -99,7 +109,7 @@ function moreButton(id, shown, total) {
 }
 
 /* ---------------------------------------------------------------- routage */
-const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees'];
+const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees', 'recherche'];
 let lastTab = 'dashboard';
 
 /* ---------------------------------------------------------------- filtres dans l'URL
@@ -198,6 +208,11 @@ function route() {
     closeDetail(false);
     const tab = TABS.includes(head) ? head : 'dashboard';
     showTab(tab);
+    if (tab === 'recherche') {
+        listHash.recherche = location.hash;
+        renderSearch(params.get('q') || '');
+        return;
+    }
     if (LIST_TABS.includes(tab)) {
         applyUrlFilters(tab, params);
         if (state.ready && (tab !== 'questions' || state.questions.length || isDown('questions'))) RENDER[tab]();
@@ -227,6 +242,7 @@ async function init() {
     $('#detailClose').addEventListener('click', () => closeDetail(true));
     $('#detailBackdrop').addEventListener('click', (e) => { if (e.target.id === 'detailBackdrop') closeDetail(true); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(true); });
+    bindSearch();
     window.addEventListener('hashchange', onNavigate);
     window.addEventListener('popstate', onNavigate);
     bindFilters();
@@ -262,6 +278,7 @@ async function init() {
 }
 
 function renderAll() {
+    if (lastTab === 'recherche') renderSearch(parseHash().params.get('q') || '');
     fillFilterOptions();
     const { head, params } = parseHash();
     if (LIST_TABS.includes(head)) applyUrlFilters(head, params);
@@ -460,10 +477,10 @@ function renderCharts() {
 
 /* ---------------------------------------------------------------- députés */
 function filteredDeputies() {
-    const q = norm($('#deputySearch').value.trim());
+    const q = tokens($('#deputySearch').value);
     const grp = $('#filterGroup').value, com = $('#filterCommission').value, sexe = $('#filterSexe').value, sort = $('#filterSort').value;
     const list = state.deputes.filter((d) =>
-        (!q || norm(`${d.prenom} ${d.nom} ${d.departement} ${d.numDepartement} ${d.groupe}`).includes(q)) &&
+        (!q.length || matches(HAY.deputes(d), q)) &&
         (!grp || d.groupeUid === grp) && (!com || d.commission === com) && (!sexe || d.sexe === sexe));
     const cmp = {
         nom: (a, b) => (a.nomTri || '').localeCompare(b.nomTri || '', 'fr'),
@@ -503,12 +520,12 @@ function renderDeputies() {
 
 /* ---------------------------------------------------------------- lois */
 function filteredBills(ignoreStep = false) {
-    const q = norm($('#loiSearch').value.trim());
+    const q = tokens($('#loiSearch').value);
     return state.dossiers.filter((d) =>
         (ignoreStep || !state.loiStep || d.etape === state.loiStep) &&
         (!state.loiCat || d.categorie === state.loiCat) &&
         (!state.loiStatus || (state.loiStatus === 'prom' ? d.etape === 5 : d.etape < 5)) &&
-        (!q || norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`).includes(q)));
+        (!q.length || matches(HAY.lois(d), q)));
 }
 
 function stepper(step) {
@@ -575,11 +592,11 @@ function loadQuestions() {
 }
 
 function filteredQuestions() {
-    const q = norm($('#questionSearch').value.trim());
+    const q = tokens($('#questionSearch').value);
     const st = $('#qStatus').value;
     return state.questions.filter((x) =>
         (!state.qType || x.type === state.qType) && (st === '' || String(+x.repondue) === st) &&
-        (!q || norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`).includes(q)));
+        (!q.length || matches(HAY.questions(x), q)));
 }
 
 function renderQuestions() {
@@ -612,8 +629,8 @@ function renderQuestions() {
 /* ---------------------------------------------------------------- scrutins */
 function renderScrutins() {
     if (isDown('scrutins')) { $('#scrutinsCount').textContent = 'Données indisponibles'; $('#scrutinsList').innerHTML = unavailable(['scrutins'], 'Scrutins'); moreButton('#scrutinsMore', 0, 0); return; }
-    const q = norm($('#scrutinSearch').value.trim());
-    const list = state.scrutins.filter((s) => !q || norm(`${s.titre} ${s.numero} ${s.demandeur}`).includes(q));
+    const q = tokens($('#scrutinSearch').value);
+    const list = state.scrutins.filter((s) => !q.length || matches(HAY.scrutins(s), q));
     const sec = (state.meta && state.meta.sections.scrutins) || {};
     $('#scrutinsCount').textContent = `${fmtNum(list.length)} scrutins affichés sur ${fmtNum(sec.total || 0)} depuis le début de la législature`;
     const el = $('#scrutinsList');
@@ -644,6 +661,110 @@ function renderScrutins() {
         </div>`;
     }).join('');
     moreButton('#scrutinsMore', state.shown.scrutins, list.length);
+}
+
+/* ---------------------------------------------------------------- recherche transversale */
+// Champ de l'en-tête + page #/recherche?q=… ; regroupe députés, lois, questions et scrutins et
+// annonce pour chaque groupe son périmètre : archives complètes ou sélection publiée.
+const SEARCH_PREVIEW = 5;
+
+function bindSearch() {
+    const go = (q, mode) => {
+        const hash = q.trim() ? `#/recherche?q=${encodeURIComponent(q.trim())}` : '#/recherche';
+        if (hash === location.hash) return;
+        // Frappe : la première lettre crée une entrée d'historique, les suivantes la remplacent.
+        history[mode === 'push' || lastTab !== 'recherche' ? 'pushState' : 'replaceState'](null, '', hash);
+        route();
+    };
+    ['#globalSearch', '#searchPageInput'].forEach((sel) => {
+        const input = $(sel);
+        input.addEventListener('input', debounce(() => go(input.value, 'replace'), 250));
+        input.form.addEventListener('submit', (e) => { e.preventDefault(); go(input.value, 'push'); input.blur(); });
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') input.blur(); });
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) || !$('#detailModal').classList.contains('hidden')) return;
+        e.preventDefault();
+        const header = $('#globalSearch');
+        if (header.offsetParent) header.focus(); else location.hash = '#/recherche';
+    });
+}
+
+const sumTotals = (obj) => Object.entries(obj || {}).filter(([k]) => !k.endsWith('_promulgues')).reduce((a, [, v]) => a + v, 0);
+
+function searchGroups() {
+    const sec = (state.meta && state.meta.sections) || {};
+    return [
+        {
+            key: 'deputes', title: 'Députés', icon: 'fa-users', items: state.deputes, primary: (d) => `${d.prenom} ${d.nom}`,
+            complete: true, scope: () => `parmi les ${fmtNum(state.deputes.length)} députés en exercice (liste complète)`,
+            render: (d) => `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2.5 flex items-center gap-3">${avatar(d, 'w-9 h-9')}
+                <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
+                <span class="block text-xs text-slate-500 truncate">${esc(d.departement)} (${esc(d.numDepartement)}) · ${esc(d.circo)}<sup>e</sup> circonscription</span></span></a>`,
+        },
+        {
+            key: 'lois', title: 'Lois', icon: 'fa-file-contract', items: state.dossiers, primary: (d) => d.titre,
+            complete: false, scope: () => `parmi les ${fmtNum(state.dossiers.length)} dossiers publiés, sur ${fmtNum(sumTotals(sec.dossiers && sec.dossiers.total))} dans la législature`,
+            render: (d) => `<a href="#/dossier/${esc(d.uid)}" class="row-link !p-2.5">
+                <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500">${statusBadge(d.statut, d.etape, d.statutDecision)}<span>${fmtShort(d.dateMaj)}</span></span>
+                <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(d.titre)}</span></a>`,
+        },
+        {
+            key: 'questions', title: 'Questions', icon: 'fa-comments', items: state.questions, primary: (x) => `${x.titre} ${x.rubrique}`,
+            complete: false, scope: () => `parmi les ${fmtNum(state.questions.length)} questions les plus récentes, sur ${fmtNum(sumTotals(sec.questions && sec.questions.total))} posées`,
+            render: (x) => `<a href="#/question/${esc(x.uid)}" class="row-link !p-2.5">
+                <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span class="badge ${QTYPE_BADGE[x.type] || ''}">${esc(x.type)}</span>${fmtShort(x.date)} · ${esc(x.auteur)} → ${esc(x.ministere || '—')}</span>
+                <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(x.titre || x.rubrique || 'Question')}</span></a>`,
+        },
+        {
+            key: 'scrutins', title: 'Scrutins', icon: 'fa-check-to-slot', items: state.scrutins, primary: (x) => x.titre,
+            complete: false, scope: () => `parmi les ${fmtNum(state.scrutins.length)} derniers scrutins, sur ${fmtNum((sec.scrutins && sec.scrutins.total) || 0)}`,
+            render: (x) => `<a href="#/scrutins?q=${esc(x.numero)}" class="row-link !p-2.5">
+                <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500">n°${esc(x.numero)} · ${fmtShort(x.date)} · ${esc(x.sort || '')}</span>
+                <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(x.titre)}</span></a>`,
+        },
+    ];
+}
+
+function renderSearch(q) {
+    ['#globalSearch', '#searchPageInput'].forEach((sel) => { if (document.activeElement !== $(sel)) $(sel).value = q; });
+    const toks = tokens(q);
+    const box = $('#searchResults');
+    if (!toks.length || toks.join('').length < 2) {
+        $('#searchSummary').textContent = '';
+        box.innerHTML = `<div class="col-span-full card text-sm text-slate-500">Tapez au moins deux caractères : un nom (« Panot »), un département (« Gironde », « 33 »), un sujet (« logement », « eau potable »), un ministère…</div>`;
+        // Arrivée sur la page de recherche vide (loupe mobile, lien) : curseur dans le champ.
+        if (!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) $('#searchPageInput').focus();
+        return;
+    }
+    if (!state.ready) { box.innerHTML = '<div class="skeleton h-40 col-span-full"></div>'; return; }
+    if (!state.questions.length && !isDown('questions')) {
+        loadQuestions().then(() => { if (lastTab === 'recherche' && (parseHash().params.get('q') || '') === q) renderSearch(q); });
+    }
+    let total = 0;
+    box.innerHTML = searchGroups().map((g) => {
+        const head = `<div class="flex items-center justify-between gap-2"><h3 class="card-title"><i class="fa-solid ${g.icon} text-blue-600"></i>${g.title}</h3>
+            <span class="badge ${g.complete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'}"
+                title="${g.complete ? 'Tous les éléments sont couverts' : 'Seule une partie des archives est publiée sur ce site'}">${g.complete ? 'Données complètes' : 'Sélection publiée'}</span></div>`;
+        if (isDown(g.key)) return `<div class="card space-y-3">${head}${unavailable([g.key], g.title)}</div>`;
+        if (g.key === 'questions' && !state.questions.length) return `<div class="card space-y-3">${head}<div class="skeleton h-24"></div></div>`;
+        const hits = g.items.map((it, i) => ({ it, i, hay: HAY[g.key](it) })).filter((h) => matches(h.hay, toks));
+        // Pertinence : mots trouvés dans le nom / titre d'abord, puis ordre de la liste (le plus récent).
+        hits.forEach((h) => { const p = norm(g.primary(h.it)); h.score = toks.filter((t) => p.includes(t)).length; });
+        hits.sort((a, b) => b.score - a.score || a.i - b.i);
+        total += hits.length;
+        const scope = `<p class="text-xs text-slate-500">${fmtNum(hits.length)} résultat(s) ${g.scope()}.</p>`;
+        const empty = g.complete
+            ? '<p class="text-sm text-slate-500">Aucun député en exercice ne correspond.</p>'
+            : `<p class="text-sm text-slate-500">Aucun résultat dans la sélection publiée. Ce n'est pas une absence dans les archives :
+                <a class="text-blue-600 dark:text-blue-400 hover:underline" href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener">archives complètes ↗</a></p>`;
+        return `<div class="card space-y-3">${head}${scope}
+            ${hits.length ? `<div class="space-y-2">${hits.slice(0, SEARCH_PREVIEW).map((h) => g.render(h.it)).join('')}</div>` : empty}
+            ${hits.length > SEARCH_PREVIEW ? `<a href="#/${g.key}?q=${encodeURIComponent(q.trim())}" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Voir les ${fmtNum(hits.length)} résultats dans « ${g.title} » →</a>` : ''}
+        </div>`;
+    }).join('');
+    $('#searchSummary').textContent = `${fmtNum(total)} résultat(s) pour « ${q.trim()} »`;
 }
 
 /* ---------------------------------------------------------------- détail (modale) */
