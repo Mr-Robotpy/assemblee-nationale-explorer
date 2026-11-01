@@ -111,7 +111,7 @@ function moreButton(id, shown, total) {
 }
 
 /* ---------------------------------------------------------------- routage */
-const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees', 'recherche'];
+const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees', 'recherche', 'suivis'];
 let lastTab = 'dashboard';
 
 /* ---------------------------------------------------------------- filtres dans l'URL
@@ -210,6 +210,11 @@ function route() {
     closeDetail(false);
     const tab = TABS.includes(head) ? head : 'dashboard';
     showTab(tab);
+    if (tab === 'suivis') {
+        listHash.suivis = location.hash;
+        renderFollows();
+        return;
+    }
     if (tab === 'recherche') {
         listHash.recherche = location.hash;
         renderSearch(params.get('q') || '');
@@ -285,6 +290,9 @@ function renderAll() {
     const { head, params } = parseHash();
     if (LIST_TABS.includes(head)) applyUrlFilters(head, params);
     renderDashboard();
+    renderDashboardFollows();
+    renderFollowsBadge();
+    if (lastTab === 'suivis') renderFollows();
     renderDeputies();
     renderBills();
     renderScrutins();
@@ -362,6 +370,25 @@ function bindFilters() {
         const b = e.target.closest('[data-retry]');
         if (b && !b.disabled) retry(b.dataset.retry.split(',').filter(Boolean));
     });
+    document.addEventListener('click', (e) => {
+        const f = e.target.closest('[data-follow], [data-unfollow]');
+        if (f) {
+            const [kind, uid] = (f.dataset.follow || f.dataset.unfollow).split(':');
+            if (f.dataset.unfollow) {
+                delete state.follows[kind === 'dossier' ? 'dossiers' : 'deputes'][uid];
+                writeFollows();
+                refreshFollowViews();
+            } else toggleFollow(kind, uid);
+            return;
+        }
+        const seen = e.target.closest('[data-seen]');
+        if (seen) {
+            const d = state.dossiers.find((x) => x.uid === seen.dataset.seen);
+            if (d) markSeen(d);
+        }
+    });
+    // Suivis modifiés dans un autre onglet
+    window.addEventListener('storage', (e) => { if (e.key === FOLLOW_KEY) { state.follows = readFollows(); refreshFollowViews(); } });
     $('#findDeputyForm').addEventListener('submit', (e) => {
         e.preventDefault();
         const v = $('#findDeputyInput').value.trim();
@@ -844,6 +871,154 @@ function renderCommunes(q, toks) {
     return { html: wrap(scope + hits.slice(0, COMMUNE_PREVIEW).map(card).join('') + more), count: hits.length };
 }
 
+/* ---------------------------------------------------------------- suivis (localStorage)
+ * Dossiers et députés suivis, gardés dans ce navigateur uniquement. Pour un dossier, on mémorise l'état « vu »
+ * (dernière étape accomplie, statut, étape, prochaine date) et on signale ce qui a changé depuis. */
+const FOLLOW_KEY = 'suivis.v1';
+let storageOk = true;
+
+function readFollows() {
+    try {
+        const f = JSON.parse(localStorage.getItem(FOLLOW_KEY) || '{}');
+        return { dossiers: f.dossiers || {}, deputes: f.deputes || {} };
+    } catch (e) { storageOk = false; return { dossiers: {}, deputes: {} }; }
+}
+function writeFollows() {
+    try { localStorage.setItem(FOLLOW_KEY, JSON.stringify(state.follows)); storageOk = true; } catch (e) { storageOk = false; }
+}
+state.follows = readFollows();
+
+const snapshot = (d) => ({ dateMaj: d.dateMaj || null, statut: d.statut || null, etape: d.etape || null,
+    prochaine: (d.prochaineEtape && d.prochaineEtape.date) || null, derniereEtape: d.derniereEtape || null });
+
+/** Changements d'un dossier suivi depuis la dernière consultation ; null s'il n'est plus publié. */
+function dossierChanges(uid) {
+    const f = state.follows.dossiers[uid];
+    const cur = state.dossiers.find((d) => d.uid === uid);
+    if (!cur) return null;
+    const a = f.vu || {}, b = snapshot(cur), out = [];
+    if (a.statut !== b.statut) out.push(`Statut : ${a.statut || '—'} → ${b.statut || '—'}`);
+    if (a.dateMaj !== b.dateMaj) out.push(`Nouvelle étape le ${fmtShort(b.dateMaj)} : ${b.derniereEtape || ''}`);
+    if (a.prochaine !== b.prochaine) out.push(b.prochaine ? `Prochaine étape prévue le ${fmtShort(b.prochaine)}` : 'Plus d\'étape programmée');
+    return out;
+}
+
+function followStats() {
+    const ids = Object.keys(state.follows.dossiers);
+    const changed = state.ready ? ids.filter((u) => { const c = dossierChanges(u); return c && c.length; }) : [];
+    const gone = state.ready && !isDown('dossiers') ? ids.filter((u) => dossierChanges(u) === null) : [];
+    return { total: ids.length + Object.keys(state.follows.deputes).length, changed, gone };
+}
+
+function followButton(kind, uid) {
+    const on = kind === 'dossier' ? !!state.follows.dossiers[uid] : !!state.follows.deputes[uid];
+    const label = kind === 'dossier' ? (on ? 'Dossier suivi' : 'Suivre ce dossier') : (on ? 'Député suivi' : 'Suivre ce député');
+    return `<button data-follow="${kind}:${esc(uid)}" aria-pressed="${on}" class="${on ? 'btn-primary !bg-amber-500 hover:!bg-amber-600' : 'btn-secondary'}"
+        title="${on ? 'Cliquer pour ne plus suivre' : 'Enregistré dans ce navigateur uniquement'}"><i class="fa-${on ? 'solid' : 'regular'} fa-star"></i>${label}</button>`;
+}
+
+function toggleFollow(kind, uid) {
+    const d = state.detail && state.detail.data && state.detail.data.uid === uid ? state.detail.data : null;
+    if (kind === 'dossier') {
+        if (state.follows.dossiers[uid]) delete state.follows.dossiers[uid];
+        else {
+            const src = d || state.dossiers.find((x) => x.uid === uid) || {};
+            state.follows.dossiers[uid] = { titre: src.titre, url: src.liens && src.liens.an, ajoute: new Date().toISOString().slice(0, 10), vu: snapshot(src) };
+        }
+    } else if (state.follows.deputes[uid]) delete state.follows.deputes[uid];
+    else {
+        const src = d || state.deputes.find((x) => x.uid === uid) || {};
+        state.follows.deputes[uid] = { nom: `${src.prenom || ''} ${src.nom || ''}`.trim(), ajoute: new Date().toISOString().slice(0, 10) };
+    }
+    writeFollows();
+    if (!storageOk) showGlobalError('Votre navigateur refuse le stockage local (navigation privée ?) : les suivis ne seront pas conservés.');
+    document.querySelectorAll(`[data-follow="${kind}:${CSS.escape(uid)}"]`).forEach((b) => { b.outerHTML = followButton(kind, uid); });
+    refreshFollowViews();
+}
+
+function markSeen(d) {
+    const f = state.follows.dossiers[d.uid];
+    if (!f) return;
+    f.vu = snapshot(d);
+    f.titre = d.titre || f.titre;
+    if (d.liens && d.liens.an) f.url = d.liens.an;
+    writeFollows();
+    refreshFollowViews();
+}
+
+function refreshFollowViews() {
+    renderFollowsBadge();
+    if (state.meta) renderDashboardFollows();
+    if (lastTab === 'suivis') renderFollows();
+}
+
+function renderFollowsBadge() {
+    const s = followStats();
+    const n = s.changed.length + s.gone.length;
+    const badge = $('#followsBadge');
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.classList.toggle('hidden', !n);
+    $('#followsLink').title = n ? `Vos suivis — ${n} changement(s)` : `Vos suivis (${s.total})`;
+}
+
+function renderDashboardFollows() {
+    const s = followStats();
+    const n = s.changed.length + s.gone.length;
+    $('#dashFollows').innerHTML = n ? `<a href="#/suivis" class="card !p-4 flex items-center gap-3 border-amber-300 dark:border-amber-700 hover:shadow-md">
+        <i class="fa-solid fa-star text-amber-500 text-xl"></i>
+        <span class="text-sm">Vos suivis : ${[
+        s.changed.length ? `<strong>${fmtNum(s.changed.length)} dossier(s) ont changé</strong> depuis votre dernière visite` : '',
+        s.gone.length ? `<strong>${fmtNum(s.gone.length)}</strong> ne sont plus dans la sélection publiée` : '',
+    ].filter(Boolean).join(' · ')}.</span>
+        <span class="ml-auto text-sm text-blue-600 dark:text-blue-400">Voir →</span></a>` : '';
+}
+
+function renderFollows() {
+    const box = $('#followsContent');
+    const deps = Object.entries(state.follows.deputes);
+    const dos = Object.entries(state.follows.dossiers);
+    if (!deps.length && !dos.length) {
+        box.innerHTML = `<div class="card text-sm text-slate-500 space-y-2"><p>Vous ne suivez encore rien.</p>
+            <p>Ouvrez la fiche d'un député ou d'un dossier de loi et cliquez sur <strong>« Suivre »</strong>. Pour un dossier, le site vous signalera ici
+            une nouvelle étape, un changement de statut ou une date programmée.</p>
+            <p><a class="text-blue-600 dark:text-blue-400 hover:underline" href="#/deputes">Trouver mon député</a> · <a class="text-blue-600 dark:text-blue-400 hover:underline" href="#/lois">Parcourir les lois</a></p></div>`;
+        return;
+    }
+    if (!state.ready) { box.innerHTML = '<div class="skeleton h-32"></div>'; return; }
+    const depHtml = deps.map(([uid, f]) => {
+        const d = state.deputes.find((x) => x.uid === uid);
+        if (!d) return `<div class="row-link !p-2.5 text-sm"><strong>${esc(f.nom || uid)}</strong> <span class="text-slate-500">— n'est plus député en exercice (ou données indisponibles).</span>
+            <button data-unfollow="depute:${esc(uid)}" class="ml-2 text-xs text-rose-600 hover:underline">Retirer</button></div>`;
+        return `<div class="flex items-center gap-2"><a href="#/depute/${esc(uid)}" class="row-link !p-2.5 flex-1 flex items-center gap-3">${avatar(d, 'w-9 h-9')}
+            <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
+            <span class="block text-xs text-slate-500">${esc(d.departement)} · ${ordinal(d.circo)} circonscription${d.participation != null ? ` · participation ${pct(d.participation)}` : ''}</span></span></a>
+            <button data-unfollow="depute:${esc(uid)}" class="text-xs text-slate-500 hover:text-rose-600 p-2" title="Ne plus suivre" aria-label="Ne plus suivre"><i class="fa-solid fa-xmark"></i></button></div>`;
+    }).join('');
+    const rows = dos.map(([uid, f]) => ({ uid, f, ch: isDown('dossiers') ? [] : dossierChanges(uid), d: state.dossiers.find((x) => x.uid === uid) }))
+        .sort((a, b) => (b.ch === null) - (a.ch === null) || (b.ch ? b.ch.length : 0) - (a.ch ? a.ch.length : 0));
+    const dosHtml = rows.map(({ uid, f, ch, d }) => {
+        const remove = `<button data-unfollow="dossier:${esc(uid)}" class="text-xs text-slate-500 hover:text-rose-600 p-2" title="Ne plus suivre" aria-label="Ne plus suivre"><i class="fa-solid fa-xmark"></i></button>`;
+        if (ch === null) {
+            return `<div class="card !p-3 flex items-start gap-2 border-slate-300"><div class="flex-1 text-sm"><p class="font-semibold">${esc(f.titre || uid)}</p>
+                <p class="text-xs text-slate-500 mt-1">N'est plus dans la sélection publiée sur ce site (dossiers les plus récemment actifs).
+                ${f.url ? `<a class="text-blue-600 dark:text-blue-400 hover:underline" href="${esc(f.url)}" target="_blank" rel="noopener">Suivre sur le site de l'Assemblée ↗</a>` : ''}</p></div>${remove}</div>`;
+        }
+        return `<div class="card !p-3 flex items-start gap-2 ${ch.length ? 'border-amber-300 dark:border-amber-700' : ''}">
+            <a href="#/dossier/${esc(uid)}" class="flex-1 min-w-0 space-y-1">
+                <span class="flex flex-wrap items-center gap-2 text-xs">${ch.length ? '<span class="badge bg-amber-500 text-white">Nouveau</span>' : ''}${statusBadge(d.statut, d.etape, d.statutDecision)}<span class="text-slate-500">${fmtShort(d.dateMaj)}</span></span>
+                <span class="block font-semibold text-sm text-slate-900 dark:text-white">${esc(d.titre)}</span>
+                ${ch.length ? `<ul class="text-xs text-amber-800 dark:text-amber-300 list-disc pl-4">${ch.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>`
+        : `<span class="block text-xs text-slate-500">Rien de nouveau depuis le ${fmtShort(f.vu && f.vu.dateMaj)}${d.prochaineEtape ? ` · prévu le ${fmtShort(d.prochaineEtape.date)}` : ''}</span>`}
+            </a>
+            <span class="flex flex-col items-end gap-1">${remove}${ch.length ? `<button data-seen="${esc(uid)}" class="text-xs text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap">Marquer comme vu</button>` : ''}</span></div>`;
+    }).join('');
+    box.innerHTML = `
+        <div class="space-y-2"><h3 class="section-title !mt-0">Dossiers suivis (${dos.length})</h3>
+            ${isDown('dossiers') ? unavailable(['dossiers'], 'Dossiers') : dosHtml || '<p class="text-sm text-slate-500">Aucun dossier suivi.</p>'}</div>
+        <div class="space-y-2"><h3 class="section-title">Députés suivis (${deps.length})</h3>
+            ${isDown('deputes') ? unavailable(['deputes'], 'Députés') : depHtml || '<p class="text-sm text-slate-500">Aucun député suivi.</p>'}</div>`;
+}
+
 /* ---------------------------------------------------------------- détail (modale) */
 let detailToken = 0;
 async function openDetail(kind, id) {
@@ -858,6 +1033,8 @@ async function openDetail(kind, id) {
         // Couleurs des groupes et liens vers les députés : attendre les listes (2 s max).
         const [data] = await Promise.all([getJSON(file), Promise.race([dataReady, new Promise((r) => setTimeout(r, 2000))])]);
         if (token !== detailToken) return;
+        state.detail = { kind, data };
+        if (kind === 'dossier') markSeen(data);  // ouvrir un dossier suivi = nouveautés vues (après calcul du bandeau)
         content.innerHTML = { depute: renderDeputeDetail, dossier: renderDossierDetail, question: renderQuestionDetail }[kind](data);
         $('#detailBackdrop').scrollTop = 0;
         if (kind === 'dossier') bindFullText(data);
@@ -932,6 +1109,7 @@ function renderDeputeDetail(d) {
     </div>
 
     <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 justify-end">
+        ${followButton('depute', d.uid)}
         ${linkBtn(`${DATA}deputes/${d.uid}.json`, 'Fiche JSON complète', 'fa-code')}
         ${linkBtn(d.liens.hatvp, 'Déclarations HATVP')}
         ${d.liens.an ? `<a href="${esc(d.liens.an)}" target="_blank" rel="noopener" class="btn-primary"><i class="fa-solid fa-landmark"></i>Fiche officielle AN</a>` : ''}
@@ -1008,6 +1186,7 @@ function renderDossierDetail(d) {
     </li>`).join('')}</ul>` : ''}
 
     <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 justify-end">
+        ${followButton('dossier', d.uid)}
         ${linkBtn(`${DATA}dossiers/${d.uid}.json`, 'JSON du dossier', 'fa-code')}
         ${linkBtn(d.liens.senat, 'Dossier au Sénat')}
         ${linkBtn(d.liens.legifrance, 'Légifrance')}

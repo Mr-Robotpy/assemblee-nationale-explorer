@@ -78,6 +78,14 @@ ni des majuscules — la même règle que les listes, pour que « Voir les N ré
 Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice) ou **sélection publiée**
 (lois, questions, scrutins), avec le total de la législature.
 
+## Suivis
+
+Bouton « Suivre » sur les fiches de dossiers et de députés ; page `#/suivis` (étoile de l'en-tête). Les suivis sont
+stockés **uniquement dans le navigateur** (`localStorage`, clé `suivis.v1`), sans compte ni envoi. Pour un dossier, le
+site mémorise l'état vu (dernière étape accomplie, statut, prochaine date programmée) et signale les changements après
+chaque mise à jour quotidienne ; un dossier sorti de la sélection publiée reste listé, avec un lien vers le site de
+l'Assemblée.
+
 ## Mise en place sur GitHub
 
 1. **Settings → Pages → Build and deployment → Source : « GitHub Actions »**.
