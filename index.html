@@ -50,7 +50,7 @@
                 <form id="globalSearchForm" role="search" class="hidden md:flex relative items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-2.5 text-slate-400 text-xs pointer-events-none"></i>
                     <input id="globalSearch" type="search" autocomplete="off" aria-label="Rechercher dans tout le site (raccourci : /)"
-                        placeholder="Député, loi, question…" class="w-40 xl:w-52 pl-8 pr-7 py-1.5 text-sm bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-blue-500 rounded-lg focus:outline-none dark:text-white">
+                        placeholder="Commune, député, loi…" class="w-40 xl:w-52 pl-8 pr-7 py-1.5 text-sm bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-blue-500 rounded-lg focus:outline-none dark:text-white">
                     <kbd class="hidden xl:block absolute right-2 text-[10px] text-slate-400 border border-slate-300 dark:border-slate-600 rounded px-1 pointer-events-none">/</kbd>
                 </form>
                 <a href="#/recherche" class="md:hidden p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300" aria-label="Rechercher dans tout le site"><i class="fa-solid fa-magnifying-glass"></i></a>
@@ -141,6 +141,11 @@
                     <input type="search" id="deputySearch" placeholder="Nom, département, n° de département…" class="input pl-9">
                 </div>
             </div>
+            <form id="findDeputyForm" class="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-lg bg-blue-50 dark:bg-slate-900/60 border border-blue-100 dark:border-slate-700">
+                <label for="findDeputyInput" class="text-sm font-semibold text-blue-900 dark:text-blue-200 whitespace-nowrap"><i class="fa-solid fa-location-dot mr-1"></i>Trouver mon député</label>
+                <input id="findDeputyInput" type="search" autocomplete="off" placeholder="Votre commune ou code postal (ex. Bourg-en-Bresse, 33000)" class="input">
+                <button class="btn-primary whitespace-nowrap">Chercher</button>
+            </form>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
                 <label class="filter-label">Groupe<select id="filterGroup" class="input text-xs"><option value="">Tous les groupes</option></select></label>
                 <label class="filter-label">Commission permanente<select id="filterCommission" class="input text-xs"><option value="">Toutes</option></select></label>
@@ -246,11 +251,11 @@
             <h2 class="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2"><i class="fa-solid fa-magnifying-glass text-blue-600"></i>Rechercher dans tout le site</h2>
             <form id="searchPageForm" role="search">
                 <input id="searchPageInput" type="search" autocomplete="off" aria-label="Rechercher dans tout le site"
-                    placeholder="Nom d'un député, département, sujet, ministère…" class="input !text-base !py-3">
+                    placeholder="Commune ou code postal, nom d'un député, sujet, ministère…" class="input !text-base !py-3">
             </form>
             <p class="text-xs text-slate-500 dark:text-slate-400">
                 Tous les mots doivent apparaître, dans n'importe quel ordre (accents et majuscules ignorés).
-                Les députés en exercice sont <strong>tous</strong> couverts ; pour les lois, questions et scrutins, la recherche porte sur la
+                Les communes et les députés en exercice sont <strong>tous</strong> couverts ; pour les lois, questions et scrutins, la recherche porte sur la
                 <strong>sélection publiée</strong> sur ce site, pas sur les archives complètes de l'Assemblée.
             </p>
             <p id="searchSummary" class="text-sm font-medium text-slate-700 dark:text-slate-200"></p>

@@ -24,6 +24,20 @@ Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json �
 | `data/textes/<uid>.json` | texte intégral (exposé des motifs + articles), récupéré une seule fois puis mis en cache |
 | `data/questions.json`, `data/questions/<QANR…>.json` | questions récentes + texte de la question et de la réponse |
 | `data/scrutins.json` | derniers scrutins, résultats par groupe |
+| `data/communes.json` | « trouver mon député » : commune → circonscription(s), codes postaux (voir ci-dessous) |
+
+### Communes et circonscriptions
+
+Les données de l'Assemblée ne relient pas communes et circonscriptions. `data/communes.json` est construit à partir
+des **résultats officiels des législatives 2024 par bureau de vote** (ministère de l'Intérieur, data.gouv.fr) : ce
+fichier ne porte pas le code de circonscription, mais la liste des candidats d'un bureau est celle de sa
+circonscription, unique dans un département (méthode déjà employée par le projet aux-voix). Les noms actuels, codes
+postaux et populations viennent de l'API Découpage administratif (geo.api.gouv.fr). Le découpage n'a pas changé depuis
+2010 : la table n'est reconstruite que tous les 30 jours (`--force-communes` pour forcer). Le calcul échoue — et la
+table précédente est conservée — si plus de 50 bureaux ne peuvent pas être rattachés.
+
+Limite : une commune partagée entre plusieurs circonscriptions (grandes villes) affiche tous les députés concernés ;
+la circonscription exacte figure sur la carte électorale.
 
 Volumes publiés (modifiables via variables d'environnement ou options CLI) : 400 dossiers (dont **tous** les
 projets de loi, complétés par les propositions les plus récemment actives), 300 scrutins,
