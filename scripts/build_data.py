@@ -591,7 +591,7 @@ def _step(codes: set[str]) -> int:
         return 4
     if any("-DEBATS" in c for c in codes):
         return 3
-    if any("-COM" in c for c in codes):
+    if any("-COM" in c and not c.endswith("-SAISIE") for c in codes):  # simple renvoi ≠ travaux en commission
         return 2
     return 1
 
@@ -607,15 +607,23 @@ def _chambre(code: str) -> str | None:
     return None
 
 
+_ADMINISTRATIF = re.compile(r"-(DEPOT|SAISIE|PROCACC|NOMIN|RETRAIT)$|^[A-Z]+\d*$")
+# Accord unique (« le texte ») : la source alterne « adopté » / « adoptée » selon le type de texte.
+_STATUTS = {"adopté": "Adopté", "adoptée": "Adopté", "adopté sans modification": "Adopté sans modification",
+            "adoptée sans modification": "Adopté sans modification", "modifié": "Modifié", "modifiée": "Modifié",
+            "rejeté": "Rejeté", "rejetée": "Rejeté"}
+
+
 def _statut_contextualise(decision: dict | None, realises: list[dict], prochaine: dict | None,
                           debut_phase: dict[str, str] | None = None) -> str:
     """« Adopté au Sénat — examen à l'Assemblée en cours » plutôt qu'un « Adopté » sans contexte."""
     courant = realises[-1] if realises else None
     if decision is None:
         lieu = CHAMBRES.get(_chambre(courant["code"]) if courant else "", "")
-        return f"En cours d'examen {lieu}".strip() if courant and len(realises) > 1 else "Déposé"
-    statut = decision["statut"].strip()
-    statut = statut[0].upper() + statut[1:]
+        # Dépôt, renvoi en commission, nomination de rapporteur : le texte n'est pas encore examiné.
+        examine = any(not _ADMINISTRATIF.search(a["code"]) for a in realises)
+        return (f"En cours d'examen {lieu}" if examine else f"Déposé {lieu}").strip()
+    statut = _STATUTS.get(norm_statut := decision["statut"].strip().lower(), norm_statut.capitalize())
     ch = _chambre(decision["code"])
     label = f"{statut} {CHAMBRES[ch]}" if ch in CHAMBRES else statut
     # L'examen continue-t-il ? Seulement si une NOUVELLE lecture s'est ouverte après la décision
@@ -756,13 +764,20 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
         for t in texte_ids:
             meta = documents.get(t, {"uid": t, "titre": None, "type": None, "date": None, "auteurs": []})
             docs.append({k: meta.get(k) for k in ("uid", "titre", "type", "date", "auteurs")} | {"liens": _doc_links(t)})
-        depot = next((a for a in actes if a["code"].endswith("-DEPOT") and a["textes"]), None)
-        texte_principal = depot["textes"][0] if depot else (texte_ids[0] if texte_ids else None)
+        # Texte principal : la version déposée à l'Assemblée (seule disponible en texte intégral ici),
+        # y compris pour un texte venu du Sénat ; à défaut, le premier texte déposé.
+        depots = [t for a in actes if a["code"].endswith("-DEPOT") for t in a["textes"]]
+        texte_principal = next((t for t in depots if "ANR5" in t), None) or (depots[0] if depots else None) \
+            or (texte_ids[0] if texte_ids else None)
         last = realises[-1] if realises else None
         prochaine = prevus[0] if prevus else None
         promulgue = next((a for a in realises if a["code"].startswith("PROM")), None)
         decision = next((a for a in reversed(realises) if a["statut"]), None)
+        # Ouverture d'une lecture = son dépôt (un rapporteur peut être nommé avant le dépôt en navette).
         debut_phase: dict[str, str] = {}
+        for a in dated:
+            if a["code"].endswith("-DEPOT"):
+                debut_phase.setdefault(a["phase"], a["date"])
         for a in dated:
             debut_phase.setdefault(a["phase"], a["date"])
         principal_meta = documents.get(texte_principal or "", {})
@@ -777,7 +792,8 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
             "dateDepot": dated[0]["date"] if dated else None,
             "dateMaj": last["date"] if last else None,
             "etape": _step(codes),
-            "derniereEtape": (f"{last['phase']} · {last['libelle']}" if last else None),
+            "derniereEtape": (f"{last['phase']} · {last['libelle']}" + (f" : {last['statut']}" if last["statut"] else "")
+                              if last else None),
             "prochaineEtape": ({"date": prochaine["date"], "libelle": f"{prochaine['phase']} · {prochaine['libelle']}"}
                                if prochaine else None),
             "statut": ("Promulguée" if promulgue else _statut_contextualise(decision, realises, prochaine, debut_phase)),
