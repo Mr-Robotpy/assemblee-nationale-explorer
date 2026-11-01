@@ -20,7 +20,7 @@ Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json �
 | `data/meta.json` | date de génération, sources, compteurs, sections en échec |
 | `data/deputes.json`, `data/deputes/<PA…>.json` | annuaire + fiche complète (organes, contacts, participation, derniers votes, questions) |
 | `data/groupes.json` | groupes politiques (couleurs officielles, sièges, parité) |
-| `data/dossiers.json`, `data/dossiers/<DLR…>.json` | dossiers de loi les plus récemment actifs + parcours législatif complet |
+| `data/dossiers.json`, `data/dossiers/<DLR…>.json` | dossiers de loi + parcours législatif complet : dernière étape **accomplie**, prochaine étape **programmée** (agenda), statut situé (« Adopté au Sénat — examen à l'Assemblée en cours ») |
 | `data/textes/<uid>.json` | texte intégral (exposé des motifs + articles), récupéré une seule fois puis mis en cache |
 | `data/questions.json`, `data/questions/<QANR…>.json` | questions récentes + texte de la question et de la réponse |
 | `data/scrutins.json` | derniers scrutins, résultats par groupe |
