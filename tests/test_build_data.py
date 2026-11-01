@@ -286,6 +286,8 @@ class CommunesTest(unittest.TestCase):
         self.assertEqual(c["ZZ229"][3:5], ["099", [3]])           # Français de l'étranger
         self.assertEqual(c["97501"][3:5], ["975", [1]])           # absente du scrutin, département à circonscription unique
         self.assertNotIn("01999", c)                              # inconnue et département à plusieurs circonscriptions
+        self.assertEqual(doc["nonRattachees"], [["Commune nouvelle", "01999", "", "01"]])  # mais listée, pas oubliée
+        self.assertEqual(doc["couverture"], {"communes": 5, "rattachees": 4, "nonRattachees": 1})
         self.assertEqual(stats["partagees"], 1)
         self.assertEqual(stats["communesSansCorrespondance"], 1)
         self.assertEqual(stats["circonscriptionsSansDepute"], 0)
