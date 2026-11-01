@@ -204,7 +204,8 @@ function bindFilters() {
         if (b.dataset.status !== undefined) { state.loiStatus = b.dataset.status; toggleChips('#loiCatFilter [data-status]', b); }
         resetAnd('lois', renderBills)();
     });
-    $('#loiStepFilter').addEventListener('click', (e) => {
+    // `?.` : une ancienne page encore en cache (sans ce bloc) ne doit pas casser tout le script.
+    $('#loiStepFilter')?.addEventListener('click', (e) => {
         const b = e.target.closest('[data-step]');
         if (!b) return;
         state.loiStep = state.loiStep === +b.dataset.step ? 0 : +b.dataset.step;  // re-cliquer annule le filtre
