@@ -102,16 +102,111 @@ function moreButton(id, shown, total) {
 const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees'];
 let lastTab = 'dashboard';
 
+/* ---------------------------------------------------------------- filtres dans l'URL
+ * L'URL est la source de vérité des filtres de chaque liste : #/lois?type=pjl&etape=3&q=logement.
+ * Valeurs par défaut omises ; valeurs inconnues ignorées (lien ancien ou modifié à la main). */
+const LIST_TABS = ['deputes', 'lois', 'questions', 'scrutins'];
+const listHash = {};  // dernière URL de chaque liste : le menu et la fermeture d'une fiche y reviennent
+
+function setSelect(sel, v) {
+    const el = $(sel);
+    el.value = [...el.options].some((o) => o.value === v) ? v : '';
+}
+const textParam = (sel) => ({ get: () => $(sel).value.trim(), set: (v) => { $(sel).value = v; } });
+const enumParam = (get, set, values) => ({ get, set: (v) => set(values.includes(v) ? v : '') });
+
+const URL_FILTERS = {
+    deputes: {
+        q: textParam('#deputySearch'),
+        groupe: { get: () => $('#filterGroup').value, set: (v) => setSelect('#filterGroup', v) },
+        commission: { get: () => $('#filterCommission').value, set: (v) => setSelect('#filterCommission', v) },
+        sexe: { get: () => $('#filterSexe').value, set: (v) => setSelect('#filterSexe', v) },
+        tri: { get: () => ($('#filterSort').value === 'nom' ? '' : $('#filterSort').value), set: (v) => { setSelect('#filterSort', v); if (!$('#filterSort').value) $('#filterSort').value = 'nom'; } },
+    },
+    lois: {
+        q: textParam('#loiSearch'),
+        type: enumParam(() => state.loiCat.toLowerCase(), (v) => { state.loiCat = v.toUpperCase(); }, ['pjl', 'ppl', 'autre']),
+        statut: enumParam(() => ({ cours: 'en-cours', prom: 'promulguees' }[state.loiStatus] || ''),
+            (v) => { state.loiStatus = { 'en-cours': 'cours', promulguees: 'prom' }[v] || ''; }, ['en-cours', 'promulguees']),
+        etape: enumParam(() => (state.loiStep ? String(state.loiStep) : ''), (v) => { state.loiStep = +v || 0; }, ['1', '2', '3', '4', '5']),
+    },
+    questions: {
+        q: textParam('#questionSearch'),
+        type: enumParam(() => state.qType.toLowerCase(), (v) => { state.qType = v.toUpperCase(); }, ['qg', 'qe', 'qosd']),
+        statut: enumParam(() => ({ 1: 'repondues', 0: 'sans-reponse' }[$('#qStatus').value] || ''),
+            (v) => { $('#qStatus').value = { repondues: '1', 'sans-reponse': '0' }[v] ?? ''; }, ['repondues', 'sans-reponse']),
+    },
+    scrutins: { q: textParam('#scrutinSearch') },
+};
+
+function parseHash() {
+    const raw = location.hash.replace(/^#\/?/, '');
+    const [path, query = ''] = raw.split('?');
+    const [head, id] = path.split('/');
+    return { head, id, params: new URLSearchParams(query) };
+}
+
+function syncChips() {
+    document.querySelectorAll('#loiCatFilter [data-cat]').forEach((b) => b.classList.toggle('chip-active', b.dataset.cat === state.loiCat));
+    document.querySelectorAll('#loiCatFilter [data-status]').forEach((b) => b.classList.toggle('chip-active', b.dataset.status === state.loiStatus));
+    document.querySelectorAll('#qTypeFilter [data-type]').forEach((b) => b.classList.toggle('chip-active', b.dataset.type === state.qType));
+}
+
+function setListHash(tab, hash) {
+    listHash[tab] = hash;
+    document.querySelectorAll(`[data-tab="${tab}"]`).forEach((a) => { a.href = hash; });
+}
+
+/** Applique les paramètres de l'URL aux contrôles de la liste (sans réécrire l'URL). */
+function applyUrlFilters(tab, params) {
+    const spec = URL_FILTERS[tab];
+    if (!spec) return;
+    Object.entries(spec).forEach(([k, f]) => f.set(params.get(k) || ''));
+    syncChips();
+    state.shown[tab] = PAGE[tab];
+    setListHash(tab, location.hash || `#/${tab}`);
+}
+
+/** Reporte les filtres courants dans l'URL : push pour un choix, replace pendant la frappe. */
+function writeUrl(tab, mode = 'push') {
+    const params = new URLSearchParams();
+    Object.entries(URL_FILTERS[tab]).forEach(([k, f]) => { const v = f.get(); if (v) params.set(k, v); });
+    const qs = params.toString();
+    const hash = `#/${tab}${qs ? `?${qs}` : ''}`;
+    setListHash(tab, hash);
+    if (hash === location.hash) return;
+    // Frappe : la première lettre crée une entrée d'historique, les suivantes la mettent à jour.
+    const push = mode === 'push' || typingIn !== tab;
+    typingIn = mode === 'replace' ? tab : null;
+    history[push ? 'pushState' : 'replaceState'](null, '', hash);
+    routedHash = location.hash;
+}
+
+const RENDER = { deputes: () => renderDeputies(), lois: () => renderBills(), questions: () => renderQuestions(), scrutins: () => renderScrutins() };
+let routedHash = null;
+let typingIn = null;  // liste dont la recherche est en cours de frappe
+
 function route() {
-    const parts = location.hash.replace(/^#\/?/, '').split('/');
-    const [head, id] = parts;
+    routedHash = location.hash;
+    typingIn = null;
+    const { head, id, params } = parseHash();
     if (['depute', 'dossier', 'question'].includes(head) && id) {
         showTab(lastTab);
         openDetail(head, decodeURIComponent(id));
         return;
     }
     closeDetail(false);
-    showTab(TABS.includes(head) ? head : 'dashboard');
+    const tab = TABS.includes(head) ? head : 'dashboard';
+    showTab(tab);
+    if (LIST_TABS.includes(tab)) {
+        applyUrlFilters(tab, params);
+        if (state.ready && (tab !== 'questions' || state.questions.length || isDown('questions'))) RENDER[tab]();
+    }
+}
+
+// Retour / Avance du navigateur : popstate (entrées pushState) et hashchange (liens) ; un seul routage par URL.
+function onNavigate() {
+    if (location.hash !== routedHash) route();
 }
 
 function showTab(tab) {
@@ -132,7 +227,8 @@ async function init() {
     $('#detailClose').addEventListener('click', () => closeDetail(true));
     $('#detailBackdrop').addEventListener('click', (e) => { if (e.target.id === 'detailBackdrop') closeDetail(true); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(true); });
-    window.addEventListener('hashchange', route);
+    window.addEventListener('hashchange', onNavigate);
+    window.addEventListener('popstate', onNavigate);
     bindFilters();
     route();
 
@@ -167,6 +263,8 @@ async function init() {
 
 function renderAll() {
     fillFilterOptions();
+    const { head, params } = parseHash();
+    if (LIST_TABS.includes(head)) applyUrlFilters(head, params);
     renderDashboard();
     renderDeputies();
     renderBills();
@@ -191,12 +289,13 @@ function showGlobalError(html) {
 }
 
 function bindFilters() {
-    const resetAnd = (key, fn) => () => { state.shown[key] = PAGE[key]; fn(); };
-    $('#deputySearch').addEventListener('input', debounce(resetAnd('deputes', renderDeputies)));
+    // Chaque changement de filtre : URL mise à jour (replace pendant la frappe, push sinon), puis rendu.
+    const resetAnd = (key, fn, mode = 'push') => () => { state.shown[key] = PAGE[key]; writeUrl(key, mode); fn(); };
+    $('#deputySearch').addEventListener('input', debounce(resetAnd('deputes', renderDeputies, 'replace')));
     ['#filterGroup', '#filterCommission', '#filterSexe', '#filterSort'].forEach((s) => $(s).addEventListener('change', resetAnd('deputes', renderDeputies)));
     $('#deputiesMore').addEventListener('click', () => { state.shown.deputes += PAGE.deputes; renderDeputies(); });
 
-    $('#loiSearch').addEventListener('input', debounce(resetAnd('lois', renderBills)));
+    $('#loiSearch').addEventListener('input', debounce(resetAnd('lois', renderBills, 'replace')));
     $('#loiCatFilter').addEventListener('click', (e) => {
         const b = e.target.closest('button');
         if (!b) return;
@@ -213,7 +312,7 @@ function bindFilters() {
     });
     $('#billsMore').addEventListener('click', () => { state.shown.lois += PAGE.lois; renderBills(); });
 
-    $('#questionSearch').addEventListener('input', debounce(resetAnd('questions', renderQuestions)));
+    $('#questionSearch').addEventListener('input', debounce(resetAnd('questions', renderQuestions, 'replace')));
     $('#qStatus').addEventListener('change', resetAnd('questions', renderQuestions));
     $('#qTypeFilter').addEventListener('click', (e) => {
         const b = e.target.closest('button');
@@ -224,14 +323,23 @@ function bindFilters() {
     });
     $('#questionsMore').addEventListener('click', () => { state.shown.questions += PAGE.questions; renderQuestions(); });
 
-    $('#scrutinSearch').addEventListener('input', debounce(resetAnd('scrutins', renderScrutins)));
+    $('#scrutinSearch').addEventListener('input', debounce(resetAnd('scrutins', renderScrutins, 'replace')));
     $('#scrutinsMore').addEventListener('click', () => { state.shown.scrutins += PAGE.scrutins; renderScrutins(); });
     $('#scrutinsList').addEventListener('click', (e) => {
         const b = e.target.closest('[data-toggle]');
         if (b) document.getElementById(b.dataset.toggle).classList.toggle('hidden');
     });
 
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', async (e) => {
+        const share = e.target.closest('[data-share]');
+        if (share) {
+            const url = location.href;
+            let ok = false;
+            try { await navigator.clipboard.writeText(url); ok = true; } catch (err) { /* contexte non sécurisé : on affiche le lien */ }
+            const label = share.querySelector('span');
+            if (ok) { label.textContent = 'Lien copié'; setTimeout(() => { label.textContent = 'Copier le lien'; }, 1800); } else { window.prompt('Lien de cette recherche :', url); }
+            return;
+        }
         const b = e.target.closest('[data-retry]');
         if (b && !b.disabled) retry(b.dataset.retry.split(',').filter(Boolean));
     });
@@ -333,7 +441,7 @@ function renderCharts() {
         options: {
             responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => g[it[0].dataIndex].libelle } } },
             scales: { y: { beginAtZero: true, grid: { color: grid } }, x: { grid: { display: false } } },
-            onClick: (_, els) => { if (els.length) { $('#filterGroup').value = g[els[0].index].uid; location.hash = '#/deputes'; renderDeputies(); } },
+            onClick: (_, els) => { if (els.length) location.hash = `#/deputes?groupe=${encodeURIComponent(g[els[0].index].uid)}`; },
         },
     });
     const f = state.deputes.filter((d) => d.sexe === 'F').length;
@@ -567,7 +675,10 @@ function closeDetail(updateHash) {
     detailToken++;
     modal.classList.add('hidden');
     document.body.style.overflow = '';
-    if (updateHash) history.pushState(null, '', `#/${lastTab === 'dashboard' ? '' : lastTab}`);
+    if (updateHash) {
+        history.pushState(null, '', listHash[lastTab] || `#/${lastTab === 'dashboard' ? '' : lastTab}`);
+        routedHash = location.hash;
+    }
 }
 
 const linkBtn = (href, label, icon = 'fa-arrow-up-right-from-square') => href ? `<a href="${esc(href)}" target="_blank" rel="noopener" class="btn-secondary"><i class="fa-solid ${icon}"></i>${label}</a>` : '';
