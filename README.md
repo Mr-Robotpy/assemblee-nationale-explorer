@@ -41,8 +41,12 @@ d'arrondissement (« 1102 » = 11e, bureau 02), ou le bureau est directement cod
 recherche « Paris » propose de choisir l'arrondissement ; « 75011 » mène directement au 11e. Noms et codes postaux des
 arrondissements : API Découpage administratif (`type=arrondissement-municipal`), sinon déduits.
 
-Limite : une commune ou un arrondissement partagé entre plusieurs circonscriptions affiche tous les députés concernés ;
-la circonscription exacte figure sur la carte électorale.
+Limites, affichées dans le bloc « Votre député par commune » (« Limites de la couverture ») :
+- une commune ou un arrondissement partagé entre plusieurs circonscriptions affiche tous les députés concernés ;
+  la circonscription exacte figure sur la carte électorale ;
+- les communes **créées ou modifiées après juin 2024** dans un département à plusieurs circonscriptions ne sont pas
+  rattachées (une vingtaine) : elles ne sont pas devinées, mais listées dans `communes.json` (`nonRattachees`) et
+  signalées comme telles si on les cherche. Le taux de couverture affiché est arrondi par défaut.
 
 Le format de la table est versionné (`COMMUNES_VERSION`) : un changement de format force le recalcul sans attendre
 les 30 jours.

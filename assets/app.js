@@ -826,13 +826,47 @@ function deputeParCirco(dept, circ) {
     return state.deputesParCirco.get(`${dept}|${circ}`);
 }
 
+/** Couverture de la table : { total, ok, non } (communes actuelles hors arrondissements), ou null si inconnue. */
+function communeCoverage() {
+    const c = state.communes && state.communes.couverture;
+    if (c) return { total: c.communes, ok: c.rattachees, non: c.nonRattachees };
+    const m = state.meta && state.meta.sections.communes;  // table d'un format antérieur : seulement le nombre
+    const rows = communeRows();
+    if (!m || !rows) return null;
+    const non = m.communesSansCorrespondance || 0;
+    return { total: rows.length + non, ok: rows.length, non };
+}
+
+/** Limites de la recherche par commune, visibles (pas seulement en infobulle) et dépliables. */
+function communeLimits(cov) {
+    const list = (state.communes && state.communes.nonRattachees) || [];
+    const vacants = (state.meta && state.meta.sections.communes && state.meta.sections.communes.circonscriptionsSansDepute) || 0;
+    const items = [];
+    if (cov && cov.non) {
+        items.push(`<li><strong>${fmtNum(cov.non)} commune(s) sur ${fmtNum(cov.total)} sans circonscription connue</strong> : créées ou modifiées après les
+            législatives de juin 2024 (source du rattachement), dans un département à plusieurs circonscriptions. Elles ne sont pas devinées.
+            ${list.length ? `<span class="block mt-1 text-slate-500">${list.map((r) => `${esc(r[0])} (${esc(r[3])})`).join(' · ')}</span>` : ''}</li>`);
+    }
+    items.push('<li><strong>Communes et arrondissements partagés</strong> entre plusieurs circonscriptions : tous les députés concernés sont affichés ; la bonne circonscription figure sur la carte électorale.</li>');
+    if (vacants) items.push(`<li><strong>${fmtNum(vacants)} circonscription(s) sans député en exercice</strong> (siège vacant) : signalées dans les résultats.</li>`);
+    items.push('<li>Rattachement calculé à partir des résultats officiels des législatives 2024 par bureau de vote (ministère de l\'Intérieur) ; noms et codes postaux : API Découpage administratif.</li>');
+    return `<details class="text-xs text-slate-600 dark:text-slate-300 border-t border-slate-200 dark:border-slate-700 pt-2">
+        <summary class="cursor-pointer font-medium text-slate-700 dark:text-slate-200">Limites de la couverture${cov && cov.non ? ` · ${fmtNum(cov.non)} commune(s) non rattachée(s)` : ''}</summary>
+        <ul class="list-disc pl-5 mt-2 space-y-1">${items.join('')}</ul></details>`;
+}
+
 function renderCommunes(q, toks) {
     const code = q.trim().replace(/\s+/g, '').toUpperCase();
     const isCode = /^(\d{5}|2[AB]\d{3})$/.test(code);
     const rows = communeRows();
+    const cov = communeCoverage();
+    const badge = !cov ? ''
+        // Arrondi par défaut : jamais « 100 % » tant qu'une commune manque.
+        : cov.non ? `<span class="badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">Couverture ${pct((Math.floor(1000 * cov.ok / cov.total) / 10).toFixed(1))} des communes</span>`
+            : '<span class="badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">Toutes les communes couvertes</span>';
     const wrap = (inner) => `<div class="col-span-full card space-y-3 border-blue-200 dark:border-blue-900">
-        <div class="flex items-center justify-between gap-2"><h3 class="card-title"><i class="fa-solid fa-location-dot text-blue-600"></i>Votre député par commune</h3>
-        <span class="badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" title="Toutes les communes sont couvertes">Données complètes</span></div>${inner}</div>`;
+        <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="card-title"><i class="fa-solid fa-location-dot text-blue-600"></i>Votre député par commune</h3>${badge}</div>
+        ${inner}${rows ? communeLimits(cov) : ''}</div>`;
     if (!rows) {
         if (!isCode) return { html: '', count: 0 };  // texte libre : on n'affiche rien tant que la table n'est pas là
         return { html: wrap(isDown('communes') ? unavailable(['communes'], 'Communes') : '<div class="skeleton h-16"></div>'), count: 0 };
@@ -857,7 +891,17 @@ function renderCommunes(q, toks) {
         hits = hits.filter((r) => !(r[6] && hitCodes.has(r[6])));          // « Paris » : la ville, qui propose ses arrondissements
     }
     const parentsAffiches = new Set(hits.filter((r) => rows.some((x) => x[6] === r[1])).map((r) => r[1]));
+    // Communes actuelles connues mais sans circonscription (créées ou modifiées après juin 2024) : le dire.
+    const orphans = (state.communes.nonRattachees || []).filter((r) => (isCode
+        ? r[1] === code || r[2].split(' ').includes(code)
+        : toks.join('').length >= 3 && matches(norm(`${r[0]} ${r[3]}`), toks)));
+    const orphanHtml = orphans.slice(0, COMMUNE_PREVIEW).map((r) => `<div class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-1 text-sm">
+        <p><span class="font-bold text-slate-900 dark:text-white">${esc(r[0])}</span> <span class="text-slate-500">· département ${esc(r[3])}${r[2] ? ` · ${esc(r[2])}` : ''}</span></p>
+        <p class="text-xs text-amber-800 dark:text-amber-200">Circonscription inconnue de ce site : la commune a été créée ou modifiée après les législatives de juin 2024,
+        dans un département qui compte plusieurs circonscriptions. Votre circonscription figure sur votre carte électorale.
+        <a class="text-blue-600 dark:text-blue-400 hover:underline" href="#/deputes?q=${encodeURIComponent(r[3])}">Voir les députés du département →</a></p></div>`).join('');
     if (!hits.length) {
+        if (orphanHtml) return { html: wrap(orphanHtml), count: orphans.length };
         return isCode ? { html: wrap(`<p class="text-sm text-slate-500">Aucune commune pour le code « ${esc(code)} ».</p>`), count: 0 } : { html: '', count: 0 };
     }
     const villeCard = (r) => {
@@ -890,7 +934,8 @@ function renderCommunes(q, toks) {
     const more = hits.length > COMMUNE_PREVIEW
         ? `<p class="text-xs text-slate-500">${fmtNum(hits.length)} communes correspondent : précisez avec le code postal ou le département (ex. « Saint-Denis 93 »).</p>` : '';
     const scope = `<p class="text-xs text-slate-500">${fmtNum(hits.length)} commune(s) parmi ${fmtNum(rows.length)} — circonscriptions des législatives de 2024, découpage en vigueur.</p>`;
-    return { html: wrap(scope + hits.slice(0, COMMUNE_PREVIEW).map(card).join('') + more), count: hits.length };
+    // Une commune non rattachée peut partager un code postal ou un nom avec des communes rattachées : l'afficher aussi.
+    return { html: wrap(scope + hits.slice(0, COMMUNE_PREVIEW).map(card).join('') + more + orphanHtml), count: hits.length + orphans.length };
 }
 
 /* ---------------------------------------------------------------- suivis (localStorage)
