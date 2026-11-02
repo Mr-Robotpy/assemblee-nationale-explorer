@@ -23,7 +23,7 @@ Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json �
 | `data/dossiers.json`, `data/dossiers/<DLR…>.json` | dossiers de loi + parcours législatif complet : dernière étape **accomplie**, prochaine étape **programmée** (agenda), statut situé (« Adopté au Sénat — examen à l'Assemblée en cours ») |
 | `data/textes/<uid>.json` | texte intégral (exposé des motifs + articles), récupéré une seule fois puis mis en cache |
 | `data/questions.json`, `data/questions/<QANR…>.json` | **toutes** les questions (index en colonnes) + fiches des récentes (texte de la question et de la réponse) |
-| `data/scrutins.json` | derniers scrutins, résultats par groupe |
+| `data/scrutins.json` | **tous** les scrutins (index en colonnes), détail par groupe pour les plus récents |
 | `data/communes.json` | « trouver mon député » : commune → circonscription(s), codes postaux (voir ci-dessous) |
 
 ### Communes et circonscriptions
@@ -89,7 +89,8 @@ les 30 jours.
 
 Volumes publiés (modifiables via variables d'environnement ou options CLI) : **tous** les dossiers de la législature
 (≈ 3 400 : projets et propositions de loi, résolutions, commissions d'enquête… ; index ≈ 2,2 Mo brut, ≈ 220 Ko
-compressé), **toutes** les questions (≈ 22 000), 300 scrutins. Fiches détaillées des questions (texte et réponse)
+compressé), **toutes** les questions (≈ 22 000), **tous** les scrutins (≈ 9 500 ; détail par groupe pour les 300 plus
+récents, `MAX_SCRUTINS` ; pour les autres, lien vers la fiche officielle). Fiches détaillées des questions (texte et réponse)
 pour les plus récentes : 3 000 écrites, 1 500 au Gouvernement, 800 orales (`MAX_QE`, `MAX_QG`, `MAX_QOSD`) ; pour les
 autres, une fiche légère tirée de l'index renvoie à la page officielle de l'Assemblée.
 Textes intégraux archivés pour tous les projets de loi et les dossiers les plus récemment actifs, 400 au total
@@ -114,7 +115,10 @@ Les dossiers sont tous publiés (index léger, ≈ 220 Ko compressés). Les ques
 référencés par indice, uid déduit du type et du numéro. Mesuré en novembre 2026 : 22 050 questions, 2,6 Mo brut et
 ≈ 690 Ko compressé, contre 7,6 Mo dans l'ancien format objet. L'index est chargé à la première ouverture de l'onglet
 Questions (ou d'une recherche) ; le texte de recherche de chaque élément est calculé une fois puis mis en cache. Seules
-les fiches détaillées restent plafonnées (≈ 155 Mo pour toutes) ; les scrutins restent plafonnés (PR suivante). Les
+les fiches détaillées restent plafonnées (≈ 155 Mo pour toutes). Les scrutins suivent le même principe (`compact_scrutins`,
+format 2) : 9 491 scrutins en 2,2 Mo brut et ≈ 230 Ko compressé, contre 20 Mo s'ils gardaient tous leur détail par groupe
+(peu de transfert grâce à la compression, mais 20 Mo de JSON à analyser sur un téléphone). L'index est chargé à la
+première ouverture de l'onglet Scrutins ou d'une recherche ; l'accueil affiche les 5 derniers depuis `meta.json`. Les
 compteurs et statistiques couvrent toute la législature.
 
 ## Liens partageables
@@ -132,9 +136,10 @@ les boutons Précédent / Suivant du navigateur parcourent les recherches, et «
 
 La recherche (champ de l'en-tête, raccourci `/`) exige que **tous les mots** apparaissent, sans tenir compte des accents
 ni des majuscules — la même règle que les listes, pour que « Voir les N résultats » ouvre une liste de N éléments.
-Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice, dossiers de loi, questions)
-ou **sélection publiée** (scrutins), avec le total de la législature. Le statut « liste complète » des lois est
-calculé (publiés ≥ total de la législature) : il disparaît si un plafond `MAX_DOSSIERS` est fixé.
+Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice, et les dossiers de loi,
+questions et scrutins de toute la législature) ou **sélection publiée**, avec le total de la législature. Le statut
+« liste complète » est calculé (éléments publiés ≥ total de la législature) : il disparaît si un plafond
+`MAX_DOSSIERS` est fixé, ou si un index de l'ancien format est conservé après l'échec d'une source.
 
 ## Suivis
 

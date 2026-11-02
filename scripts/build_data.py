@@ -527,25 +527,26 @@ def build_scrutins(path: Path, ref: Referentiel, details: dict[str, dict], max_r
                     "abstention": int(txt(dv.get("abstentions")) or 0),
                     "nonVotant": int(txt(dv.get("nonVotants")) or 0),
                 })
-        if idx < max_recent:
-            dec = get(s, "syntheseVote", "decompte") or {}
-            out.append({
-                "uid": s["uid"],
-                "numero": numero,
-                "date": date,
-                "titre": txt(s.get("titre")) or txt(get(s, "objet", "libelle")),
-                "type": txt(get(s, "typeVote", "libelleTypeVote")),
-                "sort": txt(get(s, "sort", "code")),
-                "demandeur": txt(get(s, "demandeur", "texte")),
-                "votants": int(txt(get(s, "syntheseVote", "nombreVotants")) or 0),
-                "exprimes": int(txt(get(s, "syntheseVote", "suffragesExprimes")) or 0),
-                "requis": int(txt(get(s, "syntheseVote", "nbrSuffragesRequis")) or 0),
-                "pour": int(txt(dec.get("pour")) or 0),
-                "contre": int(txt(dec.get("contre")) or 0),
-                "abstention": int(txt(dec.get("abstentions")) or 0),
-                "groupes": sorted(groupes_out, key=lambda g: -g["membres"]),
-                "url": f"{AN_SITE}/dyn/{LEGISLATURE}/scrutins/{numero}",
-            })
+        # Index : tous les scrutins (la recherche trouve tout) ; détail par groupe pour les plus récents seulement
+        # (max_recent), les autres renvoient à la fiche officielle de l'AN.
+        dec = get(s, "syntheseVote", "decompte") or {}
+        out.append({
+            "uid": s["uid"],
+            "numero": numero,
+            "date": date,
+            "titre": txt(s.get("titre")) or txt(get(s, "objet", "libelle")),
+            "type": txt(get(s, "typeVote", "libelleTypeVote")),
+            "sort": txt(get(s, "sort", "code")),
+            "demandeur": txt(get(s, "demandeur", "texte")),
+            "votants": int(txt(get(s, "syntheseVote", "nombreVotants")) or 0),
+            "exprimes": int(txt(get(s, "syntheseVote", "suffragesExprimes")) or 0),
+            "requis": int(txt(get(s, "syntheseVote", "nbrSuffragesRequis")) or 0),
+            "pour": int(txt(dec.get("pour")) or 0),
+            "contre": int(txt(dec.get("contre")) or 0),
+            "abstention": int(txt(dec.get("abstentions")) or 0),
+            "groupes": sorted(groupes_out, key=lambda g: -g["membres"]) if idx < max_recent else None,
+            "url": f"{AN_SITE}/dyn/{LEGISLATURE}/scrutins/{numero}",
+        })
 
     for uid, st in stats.items():
         details[uid]["scrutins"] = {
@@ -556,6 +557,44 @@ def build_scrutins(path: Path, ref: Referentiel, details: dict[str, dict], max_r
             "derniers": recent.get(uid, []),
         }
     return out, {"total": len(scrutins), "dernier": d10(scrutins[0].get("dateScrutin")) if scrutins else None}
+
+
+SCRUTINS_FORMAT = 2
+SCRUTINS_COLONNES = ["numero", "date", "titre", "type (indice)", "sort (indice)", "demandeur (indice)", "votants",
+                     "exprimes", "requis", "pour", "contre", "abstention",
+                     "groupes : [[groupe (indice), position (indice), pour, contre, abstention, nonVotant, membres], …] ou 0"]
+
+
+def compact_scrutins(scrutins: list[dict]) -> dict:
+    """Index des scrutins en colonnes (≈ 9 500 lignes) : types, sorts, demandeurs, groupes et positions rangés une fois
+    dans des tables et référencés par indice (-1 = absent). uid (VTANR5L17V<numéro>) et URL officielle se déduisent du
+    numéro ; un uid hors modèle est ajouté en fin de ligne. Détail par groupe : scrutins récents seulement (0 sinon)."""
+    tables: dict[str, dict] = {k: {} for k in ("types", "sorts", "demandeurs", "groupes", "positions")}
+
+    def idx(table: str, key: Any, value: Any = None) -> int:
+        if key in (None, ""):
+            return -1
+        t = tables[table]
+        if key not in t:
+            t[key] = (len(t), value if value is not None else key)
+        return t[key][0]
+
+    lignes = []
+    for sc in scrutins:
+        groupes = [[idx("groupes", g["uid"], [g["uid"], g["abrev"], g["couleur"]]), idx("positions", g["position"]),
+                    g["pour"], g["contre"], g["abstention"], g["nonVotant"], g["membres"]] for g in sc["groupes"]] \
+            if sc.get("groupes") is not None else 0
+        ligne = [sc["numero"], sc["date"], sc["titre"], idx("types", sc["type"]), idx("sorts", sc["sort"]),
+                 idx("demandeurs", sc["demandeur"]), sc["votants"], sc["exprimes"], sc["requis"], sc["pour"],
+                 sc["contre"], sc["abstention"], groupes]
+        if sc["uid"] != f"VTANR5L{LEGISLATURE}V{sc['numero']}":
+            ligne.append(sc["uid"])
+        lignes.append(ligne)
+    out = {"format": SCRUTINS_FORMAT, "legislature": LEGISLATURE, "colonnes": SCRUTINS_COLONNES}
+    for k, t in tables.items():
+        out[k] = [v for _, v in sorted(t.values(), key=lambda x: x[0])]
+    out["s"] = lignes
+    return out
 
 
 # --------------------------------------------------------------------------- dossiers législatifs
@@ -1391,7 +1430,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="dossiers publiés (0 = tous, défaut)")
     ap.add_argument("--max-textes", type=int, default=int(os.environ.get("MAX_TEXTES", 400)),
                     help="textes intégraux archivés : projets de loi + dossiers les plus récemment actifs (0 = tous)")
-    ap.add_argument("--max-scrutins", type=int, default=int(os.environ.get("MAX_SCRUTINS", 300)))
+    ap.add_argument("--max-scrutins", type=int, default=int(os.environ.get("MAX_SCRUTINS", 300)),
+                    help="scrutins récents avec détail par groupe (l'index publie tous les scrutins)")
     # L'index publie toutes les questions ; ces plafonds ne limitent que les fiches détaillées (texte et réponse).
     ap.add_argument("--max-qe", type=int, default=int(os.environ.get("MAX_QE", 3000)), help="fiches de questions écrites (0 = toutes)")
     ap.add_argument("--max-qg", type=int, default=int(os.environ.get("MAX_QG", 1500)), help="fiches de questions au Gouvernement (0 = toutes)")
@@ -1432,9 +1472,14 @@ def main(argv: list[str] | None = None) -> int:
     if "scrutins" in src:
         try:
             scrutins, sc_meta = build_scrutins(src["scrutins"], ref, details, args.max_scrutins, 15)
-            write_json(out / "scrutins.json", scrutins)
-            meta["sections"]["scrutins"] = {"majLe": now, **sc_meta, "affiches": len(scrutins)}
-            LOG.info("Scrutins : %d publiés sur %d", len(scrutins), sc_meta["total"])
+            write_json(out / "scrutins.json", compact_scrutins(scrutins))
+            avec_groupes = sum(1 for x in scrutins if x["groupes"] is not None)
+            # Les 5 derniers, pour l'accueil : meta.json est chargé au démarrage, l'index complet à la demande.
+            derniers = [{k: x[k] for k in ("uid", "numero", "date", "titre", "sort", "pour", "contre", "abstention")}
+                        for x in scrutins[:5]]
+            meta["sections"]["scrutins"] = {"majLe": now, **sc_meta, "affiches": len(scrutins), "detailGroupes": avec_groupes,
+                                            "format": SCRUTINS_FORMAT, "derniers": derniers}
+            LOG.info("Scrutins : %d dans l'index, détail par groupe pour %d", len(scrutins), avec_groupes)
         except Exception:
             LOG.exception("Échec section scrutins")
             failures.append("scrutins")

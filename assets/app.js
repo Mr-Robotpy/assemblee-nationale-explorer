@@ -29,7 +29,7 @@ async function loadLists(keys) {
     results.forEach((r, i) => {
         const k = keys[i];
         if (r.status === 'fulfilled') {
-            state[k] = k === 'questions' ? expandQuestions(r.value) : r.value;
+            state[k] = k === 'questions' ? expandQuestions(r.value) : k === 'scrutins' ? expandScrutins(r.value) : r.value;
             delete state.failed[k];
             if (k === 'deputes') state.deputesParCirco = null;
         }
@@ -57,6 +57,40 @@ function expandQuestions(doc) {
     });
 }
 
+/* Index des scrutins : format en colonnes (format 2, tous les scrutins de la législature, ≈ 9 500 lignes ; détail par
+ * groupe pour les plus récents seulement, voir compact_scrutins dans build_data.py), ou ancien format (liste d'objets,
+ * derniers scrutins, tous avec groupes). Rendu : objets de l'ancien format, `groupes` à null sans détail. */
+function expandScrutins(doc) {
+    if (Array.isArray(doc)) return doc;
+    const leg = doc.legislature || '17';
+    const at = (table, i) => (i >= 0 ? doc[table][i] : null);
+    return (doc.s || []).map((l) => {
+        const [numero, date, titre, ty, so, dem, votants, exprimes, requis, pour, contre, abstention, grp, uid] = l;
+        return { uid: uid || `VTANR5L${leg}V${numero}`, numero, date, titre, type: at('types', ty), sort: at('sorts', so),
+            demandeur: at('demandeurs', dem), votants, exprimes, requis, pour, contre, abstention,
+            url: `https://www.assemblee-nationale.fr/dyn/${leg}/scrutins/${numero}`,
+            groupes: Array.isArray(grp) ? grp.map(([g, pos, gPour, gContre, gAbst, nonVotant, membres]) => {
+                const [gUid, abrev, couleur] = at('groupes', g) || [null, null, null];
+                return { uid: gUid, abrev, couleur, position: at('positions', pos), pour: gPour, contre: gContre,
+                    abstention: gAbst, nonVotant, membres };
+            }) : null };
+    });
+}
+
+// Index complet (≈ 2,2 Mo brut, ≈ 230 Ko compressé) : chargé à la première visite de l'onglet ou d'une recherche ;
+// l'accueil affiche les 5 derniers depuis meta.json.
+let scrutinsLoading = null;
+function loadScrutins() {
+    if (scrutinsLoading) return scrutinsLoading;
+    if (!state.scrutins.length) $('#scrutinsList').innerHTML = Array.from({ length: 4 }, () => '<div class="skeleton h-20 w-full"></div>').join('');
+    scrutinsLoading = loadLists(['scrutins']).then(() => {
+        if (isDown('scrutins')) scrutinsLoading = null;
+        renderScrutins();
+        renderMeta();
+    });
+    return scrutinsLoading;
+}
+
 function unavailable(keys, label) {
     const ks = keys.filter((k) => state.failed[k]);
     return `<div class="col-span-full card text-center space-y-3 border-amber-300 dark:border-amber-700">
@@ -81,7 +115,7 @@ const HAY = {
     deputes: (d) => norm(`${d.prenom} ${d.nom} ${d.departement} ${d.numDepartement} ${d.groupe} ${d.circo}e circonscription`),
     lois: (d) => d._hay || (d._hay = norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`)),
     questions: (x) => x._hay || (x._hay = norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`)),
-    scrutins: (x) => norm(`${x.titre} ${x.numero} ${x.demandeur}`),
+    scrutins: (x) => x._hay || (x._hay = norm(`${x.titre} ${x.numero} ${x.demandeur}`)),
 };
 /** 1 → « 1<sup>re</sup> », 2 → « 2<sup>e</sup> » (circonscriptions). */
 const ordinal = (n) => `${esc(n)}<sup>${String(n) === '1' ? 're' : 'e'}</sup>`;
@@ -263,7 +297,8 @@ function route() {
     }
     if (LIST_TABS.includes(tab)) {
         applyUrlFilters(tab, params);
-        if (state.ready && (tab !== 'questions' || state.questions.length || isDown('questions'))) RENDER[tab]();
+        const paresseux = { questions: 'questions', scrutins: 'scrutins' }[tab];  // index chargés à la demande
+        if (state.ready && (!paresseux || state[paresseux].length || isDown(paresseux))) RENDER[tab]();
     }
 }
 
@@ -279,6 +314,7 @@ function showTab(tab) {
     document.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab === 'donnees') { try { renderMeta(); } catch (e) { console.error(e); } }
     if (tab === 'questions' && state.ready) loadQuestions();
+    if (tab === 'scrutins' && state.ready) loadScrutins();
 }
 
 /* ---------------------------------------------------------------- démarrage */
@@ -320,11 +356,12 @@ async function init() {
         showGlobalError(`Dernière mise à jour partielle : section(s) ${esc(meta.echecs.join(', '))} non rafraîchie(s), données précédentes affichées.`);
     }
 
-    await loadLists(['deputes', 'groupes', 'dossiers', 'scrutins']);
+    await loadLists(['deputes', 'groupes', 'dossiers']);
     state.ready = true;
     markReady();
     renderAll();
     if (lastTab === 'questions') loadQuestions();
+    if (lastTab === 'scrutins') loadScrutins();
 }
 
 function renderAll() {
@@ -338,7 +375,7 @@ function renderAll() {
     if (lastTab === 'suivis') renderFollows();
     renderDeputies();
     renderBills();
-    renderScrutins();
+    if (state.scrutins.length || isDown('scrutins')) renderScrutins();
     if (state.questions.length || isDown('questions')) renderQuestions();
     renderMeta();
 }
@@ -347,6 +384,7 @@ async function retry(keys) {
     keys = [...new Set([...keys, ...Object.keys(state.failed)])];  // un clic relance toutes les listes en échec
     keys.forEach((k) => cache.delete(LISTS[k]));
     if (keys.includes('questions')) questionsLoading = null;
+    if (keys.includes('scrutins')) scrutinsLoading = null;
     document.querySelectorAll('[data-retry]').forEach((b) => { b.disabled = true; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>Chargement…'; });
     await loadLists(keys);
     renderAll();
@@ -487,8 +525,10 @@ function renderDashboard() {
     ].join('');
     $('#majorityLabel').textContent = nbDep ? `Majorité absolue : ${Math.floor(nbDep / 2) + 1} sièges` : '';
 
-    $('#dashScrutins').innerHTML = isDown('scrutins') ? unavailable(['scrutins'], 'Scrutins')
-        : state.scrutins.slice(0, 5).map(scrutinMini).join('') || '<p class="text-xs text-slate-500">Aucun scrutin.</p>';
+    const derniersScrutins = state.scrutins.length ? state.scrutins.slice(0, 5)
+        : ((state.meta && state.meta.sections.scrutins && state.meta.sections.scrutins.derniers) || []);
+    $('#dashScrutins').innerHTML = isDown('scrutins') && !derniersScrutins.length ? unavailable(['scrutins'], 'Scrutins')
+        : derniersScrutins.map(scrutinMini).join('') || '<p class="text-xs text-slate-500">Aucun scrutin.</p>';
     $('#dashDossiers').innerHTML = isDown('dossiers') ? unavailable(['dossiers'], 'Textes') : state.dossiers.slice(0, 5).map((d) => `
         <a href="#/dossier/${esc(d.uid)}" class="row-link">
             <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1 gap-2">
@@ -712,7 +752,9 @@ function renderScrutins() {
     const q = tokens($('#scrutinSearch').value);
     const list = state.scrutins.filter((s) => !q.length || matches(HAY.scrutins(s), q));
     const sec = (state.meta && state.meta.sections.scrutins) || {};
-    $('#scrutinsCount').textContent = `${fmtNum(list.length)} scrutins affichés sur ${fmtNum(sec.total || 0)} depuis le début de la législature`;
+    $('#scrutinsCount').textContent = scrutinsComplets()
+        ? `${fmtNum(list.length)} scrutin(s) — tous ceux de la législature (${fmtNum(sec.total || 0)})`
+        : `${fmtNum(list.length)} scrutins affichés sur ${fmtNum(sec.total || 0)} depuis le début de la législature`;
     const el = $('#scrutinsList');
     if (!list.length) { el.innerHTML = emptyState('Aucun scrutin.'); moreButton('#scrutinsMore', 0, 0); return; }
     el.innerHTML = list.slice(0, state.shown.scrutins).map((s) => {
@@ -730,14 +772,15 @@ function renderScrutins() {
             <div class="flex flex-wrap justify-between gap-2 text-xs">
                 <span><b class="text-emerald-600">Pour ${s.pour}</b> · <b class="text-rose-600">Contre ${s.contre}</b> · Abstention ${s.abstention} · Votants ${s.votants}</span>
                 <span class="flex gap-3">
-                    <button data-toggle="sg-${esc(s.uid)}" class="text-blue-600 dark:text-blue-400 hover:underline">Détail par groupe</button>
-                    <a href="${esc(s.url)}" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Fiche officielle ↗</a>
+                    ${s.groupes ? `<button data-toggle="sg-${esc(s.uid)}" class="text-blue-600 dark:text-blue-400 hover:underline">Détail par groupe</button>` : ''}
+                    <a href="${esc(s.url)}" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline"
+                        ${s.groupes ? '' : 'title="Le détail par groupe des scrutins anciens est sur la fiche officielle de l\'Assemblée"'}>${s.groupes ? 'Fiche officielle ↗' : 'Détail par groupe : fiche officielle ↗'}</a>
                 </span>
             </div>
-            <div id="sg-${esc(s.uid)}" class="hidden overflow-x-auto">
+            ${s.groupes ? `<div id="sg-${esc(s.uid)}" class="hidden overflow-x-auto">
                 <table class="w-full text-xs mt-2"><thead><tr class="text-slate-500 text-left"><th class="py-1">Groupe</th><th>Position</th><th>Pour</th><th>Contre</th><th>Abst.</th><th>Membres</th></tr></thead>
                 <tbody>${s.groupes.map((g) => `<tr class="border-t border-slate-100 dark:border-slate-700"><td class="py-1">${groupBadge(g.abrev, g.uid)}</td><td>${esc(g.position)}</td><td>${g.pour}</td><td>${g.contre}</td><td>${g.abstention}</td><td>${g.membres}</td></tr>`).join('')}</tbody></table>
-            </div>
+            </div>` : ''}
         </div>`;
     }).join('');
     moreButton('#scrutinsMore', state.shown.scrutins, list.length);
@@ -772,6 +815,11 @@ function bindSearch() {
 }
 
 const sumTotals = (obj) => Object.entries(obj || {}).filter(([k]) => !k.endsWith('_promulgues')).reduce((a, [, v]) => a + v, 0);
+/** Tous les scrutins de la législature sont dans l'index (format 2 ; l'ancien format n'avait que les derniers). */
+const scrutinsComplets = () => {
+    const sec = (state.meta && state.meta.sections && state.meta.sections.scrutins) || {};
+    return state.scrutins.length > 0 && state.scrutins.length >= (sec.total || Infinity);
+};
 /** Toutes les questions de la législature sont dans l'index (format 2 ; l'ancien format n'avait que les récentes). */
 const questionsCompletes = () => {
     const sec = (state.meta && state.meta.sections && state.meta.sections.questions) || {};
@@ -816,7 +864,10 @@ function searchGroups() {
         },
         {
             key: 'scrutins', title: 'Scrutins', icon: 'fa-check-to-slot', items: state.scrutins, primary: (x) => x.titre,
-            complete: false, scope: () => `parmi les ${fmtNum(state.scrutins.length)} derniers scrutins, sur ${fmtNum((sec.scrutins && sec.scrutins.total) || 0)}`,
+            complete: scrutinsComplets(), empty: 'Aucun scrutin de la législature ne correspond.',
+            scope: () => (scrutinsComplets()
+                ? `parmi les ${fmtNum(state.scrutins.length)} scrutins de la législature (liste complète)`
+                : `parmi les ${fmtNum(state.scrutins.length)} derniers scrutins, sur ${fmtNum((sec.scrutins && sec.scrutins.total) || 0)}`),
             render: (x) => `<a href="#/scrutins?q=${esc(x.numero)}" class="row-link !p-2.5">
                 <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500">n°${esc(x.numero)} · ${fmtShort(x.date)} · ${esc(x.sort || '')}</span>
                 <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(x.titre)}</span></a>`,
@@ -838,6 +889,7 @@ function renderSearch(q) {
     if (!state.ready) { box.innerHTML = '<div class="skeleton h-40 col-span-full"></div>'; return; }
     const stillHere = () => lastTab === 'recherche' && (parseHash().params.get('q') || '') === q;
     if (!state.questions.length && !isDown('questions')) loadQuestions().then(() => { if (stillHere()) renderSearch(q); });
+    if (!state.scrutins.length && !isDown('scrutins')) loadScrutins().then(() => { if (stillHere()) renderSearch(q); });
     if (!communeRows() && !isDown('communes')) loadCommunes().then(() => { if (stillHere()) renderSearch(q); });
     const communes = renderCommunes(q, toks);
     let total = communes.count;
@@ -846,7 +898,7 @@ function renderSearch(q) {
             <span class="badge ${g.complete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'}"
                 title="${g.complete ? 'Tous les éléments sont couverts' : 'Seule une partie des archives est publiée sur ce site'}">${g.complete ? 'Données complètes' : 'Sélection publiée'}</span></div>`;
         if (isDown(g.key)) return `<div class="card space-y-3">${head}${unavailable([g.key], g.title)}</div>`;
-        if (g.key === 'questions' && !state.questions.length) return `<div class="card space-y-3">${head}<div class="skeleton h-24"></div></div>`;
+        if ((g.key === 'questions' || g.key === 'scrutins') && !g.items.length) return `<div class="card space-y-3">${head}<div class="skeleton h-24"></div></div>`;
         const hits = g.items.map((it, i) => ({ it, i, hay: HAY[g.key](it) })).filter((h) => matches(h.hay, toks));
         // Pertinence : mots trouvés dans le nom / titre d'abord, puis ordre de la liste (le plus récent).
         hits.forEach((h) => { const p = norm(g.primary(h.it)); h.score = toks.filter((t) => p.includes(t)).length; });
@@ -1735,7 +1787,7 @@ function renderMeta() {
             ['groupes.json', 'Groupes politiques'],
             ['dossiers.json', 'Index des dossiers de loi'],
             ['questions.json', 'Index des questions (en colonnes)'],
-            ['scrutins.json', 'Derniers scrutins'],
+            ['scrutins.json', 'Index des scrutins (en colonnes)'],
         ];
         if (first(state.deputes)) opts.push([`deputes/${first(state.deputes)}.json`, 'Fiche député (exemple)']);
         if (first(state.dossiers)) opts.push([`dossiers/${first(state.dossiers)}.json`, 'Dossier législatif (exemple)']);
@@ -1753,7 +1805,7 @@ function renderMeta() {
         row('Députés', fmtNum(s.deputes && s.deputes.total)),
         row('Dossiers affichés', `${fmtNum(s.dossiers && s.dossiers.affiches)} · ${fmtNum(s.dossiers && s.dossiers.textesRecuperes)} textes intégraux récupérés au dernier passage`),
         row('Questions', `${fmtNum(s.questions && s.questions.affiches)} dans l'index${s.questions && s.questions.fiches ? ` · ${fmtNum(s.questions.fiches)} fiches détaillées` : ''}`),
-        row('Scrutins', `${fmtNum(s.scrutins && s.scrutins.affiches)} affichés / ${fmtNum(s.scrutins && s.scrutins.total)}`),
+        row('Scrutins', `${fmtNum(s.scrutins && s.scrutins.affiches)} dans l'index / ${fmtNum(s.scrutins && s.scrutins.total)}${s.scrutins && s.scrutins.detailGroupes ? ` · détail par groupe pour les ${fmtNum(s.scrutins.detailGroupes)} plus récents` : ''}`),
         `<div class="stat md:col-span-2"><span class="stat-label">Sources officielles</span>${Object.entries(m.sources || {}).map(([k, u]) =>
             `<a class="block truncate text-blue-600 dark:text-blue-400 hover:underline font-mono" href="${esc(u)}">${esc(k)} — ${esc(u.split('/').pop())}</a>`).join('')}
             ${(m.sourcesIndisponibles || []).length ? `<p class="text-amber-600 mt-1">Indisponibles au dernier passage : ${esc(m.sourcesIndisponibles.join(', '))}</p>` : ''}</div>`,
