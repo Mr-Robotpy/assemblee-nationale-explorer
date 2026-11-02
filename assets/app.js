@@ -879,13 +879,16 @@ function addressForm(box) {
     box.querySelector('input').focus();
 }
 
+/** Appel à l'API Adresse (seul envoi à un tiers, toujours déclenché par un clic de l'utilisateur). */
+async function apiAdresse(params) {
+    const p = new URLSearchParams({ limit: '3', autocomplete: '0', ...params });
+    const res = await fetch(`${API_ADRESSE}?${p}`, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!res.ok) throw new Error(`API Adresse : ${res.status}`);
+    return (await res.json()).features || [];
+}
+
 async function geocode(q, box) {
-    const ask = async (extra) => {
-        const p = new URLSearchParams({ q, limit: '3', autocomplete: '0', ...extra });
-        const res = await fetch(`${API_ADRESSE}?${p}`, { credentials: 'omit', referrerPolicy: 'no-referrer' });
-        if (!res.ok) throw new Error(`API Adresse : ${res.status}`);
-        return (await res.json()).features || [];
-    };
+    const ask = (extra) => apiAdresse({ q, ...extra });
     let f = await ask({ citycode: box.dataset.insee });
     if (!f.length && box.dataset.cp) f = await ask({ postcode: box.dataset.cp });
     return f[0] || null;
@@ -921,7 +924,79 @@ async function locate(box, lon, lat, label) {
     </div>`;
 }
 
+/* « Trouver mon député par adresse » (page Députés et page de recherche) : n'importe quelle adresse en France.
+ * Commune à circonscription unique : réponse par la table des communes ; commune partagée ou non rattachée :
+ * calcul dans les contours du département. Même consentement que « Préciser avec mon adresse ». */
+function globalAddressForm(i) {
+    return `<form data-gaddr-form class="space-y-2 p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+        <label for="gaddr-${i}" class="block text-sm font-semibold text-slate-800 dark:text-slate-100"><i class="fa-solid fa-house mr-1 text-blue-600"></i>Trouver mon député par adresse</label>
+        <div class="flex flex-col sm:flex-row gap-2">
+            <input id="gaddr-${i}" name="adresse" required minlength="5" autocomplete="street-address"
+                placeholder="Adresse complète (ex. 12 rue de la République, Lyon)" class="input !text-sm">
+            <button class="btn-primary whitespace-nowrap">Chercher par adresse</button>
+        </div>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400"><i class="fa-solid fa-shield-halved mr-1"></i>En cliquant sur « Chercher par adresse », l'adresse
+            saisie est envoyée à l'<strong>API Adresse de l'État</strong> (api-adresse.data.gouv.fr) pour être localisée ; la circonscription est ensuite trouvée
+            sur votre appareil. Ce site ne conserve pas l'adresse. Sans envoi : utilisez la recherche par commune ou code postal. <a class="underline" href="#/mentions">Confidentialité</a></p>
+        <div data-gaddr-result aria-live="polite" class="text-sm"></div>
+    </form>`;
+}
+
+const deptFromInsee = (code) => (/^97/.test(code) ? code.slice(0, 3) : code.slice(0, 2));
+
+async function resolveAddress(q, out) {
+    out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
+    let f;
+    try {
+        [f] = await apiAdresse({ q, limit: '1' });
+    } catch (err) {
+        out.innerHTML = `<p class="text-xs text-rose-600">Service de localisation indisponible (${esc(err.message)}). Utilisez la recherche par commune ou code postal.</p>`;
+        return;
+    }
+    if (!f) {
+        out.innerHTML = '<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable. Indiquez le numéro, la voie et la commune, ou utilisez la recherche par commune.</p>';
+        return;
+    }
+    const { label, citycode, city } = f.properties || {};
+    const [lon, lat] = f.geometry.coordinates;
+    await loadCommunes();
+    const rows = communeRows() || [];
+    const row = rows.find((r) => r[1] === citycode);
+    const orphan = !row && ((state.communes && state.communes.nonRattachees) || []).find((r) => r[1] === citycode);
+    const dept = row ? row[3] : orphan ? orphan[3] : deptFromInsee(String(citycode || ''));
+    let circ = null, dist = null, source = '';
+    if (row && row[4].length === 1) {
+        circ = row[4][0];
+        source = 'commune entièrement comprise dans cette circonscription';
+    } else {
+        try {
+            const fc = await getJSON(`circos/${dept}.json`);
+            const hit = window.ANGeo.findCirco(fc.features || [], lon, lat, row ? row[4] : undefined);
+            if (hit) { circ = hit.circo; dist = hit.distanceM; source = 'calcul à partir des contours de circonscription de 2024'; }
+        } catch (e) { /* contours absents : message ci-dessous */ }
+    }
+    const reconnue = `<p class="text-xs text-slate-500">Adresse reconnue : <strong class="text-slate-700 dark:text-slate-200">${esc(label || q)}</strong></p>`;
+    if (circ === null) {
+        out.innerHTML = `<div class="mt-2 space-y-1">${reconnue}<p class="text-xs text-amber-700 dark:text-amber-300">Circonscription non déterminée pour cette adresse${city ? ` (${esc(city)})` : ''}.
+            <a class="underline" href="#/recherche?q=${encodeURIComponent(citycode || city || '')}">Voir la commune</a> ou consultez votre carte électorale.</p></div>`;
+        return;
+    }
+    const d = deputeParCirco(dept, String(circ));
+    const proche = dist !== null && dist < LIMITE_PROCHE_M;
+    out.innerHTML = `<div class="mt-2 p-3 rounded-lg ${proche ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20'} space-y-2">
+        ${reconnue}
+        ${d ? `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2 flex items-center gap-3 bg-white dark:bg-slate-800">${avatar(d, 'w-10 h-10')}
+            <span class="min-w-0"><span class="block font-semibold text-slate-900 dark:text-white">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
+            <span class="block text-xs text-slate-500">${esc(d.departement)} · ${ordinal(circ)} circonscription</span></span></a>`
+        : `<p>${ordinal(circ)} circonscription (${esc(dept)}) : siège vacant ou député introuvable dans les données.</p>`}
+        ${proche ? `<p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-triangle-exclamation mr-1"></i>À environ ${Math.round(dist)} m d'une limite
+            de circonscription : les contours utilisés sont approximatifs. Vérifiez sur votre carte électorale.</p>` : ''}
+        <p class="text-[11px] text-slate-500">Résultat indicatif (${esc(source)}) ; la carte électorale fait foi.</p>
+    </div>`;
+}
+
 function bindAddress() {
+    document.querySelectorAll('[data-global-addr]').forEach((el, i) => { el.innerHTML = globalAddressForm(i); });
     document.addEventListener('click', (e) => {
         const open = e.target.closest('[data-addr-open]');
         if (open) { addressForm(open.closest('[data-addr]')); return; }
@@ -937,6 +1012,12 @@ function bindAddress() {
             { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });  // position fraîche, jamais une position en cache
     });
     document.addEventListener('submit', async (e) => {
+        const gform = e.target.closest('[data-gaddr-form]');
+        if (gform) {
+            e.preventDefault();
+            await resolveAddress(gform.adresse.value.trim(), gform.querySelector('[data-gaddr-result]'));
+            return;
+        }
         const form = e.target.closest('[data-addr-form]');
         if (!form) return;
         e.preventDefault();

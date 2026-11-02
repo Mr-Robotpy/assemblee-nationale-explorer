@@ -1214,7 +1214,7 @@ def update_communes(out: Path, cache: Path, source_dir: Path | None, deputes_key
 CIRCOS_URL = ("https://static.data.gouv.fr/resources/contours-geographiques-des-circonscriptions-legislatives/"
               "20240613-191506/circonscriptions-legislatives-p20.geojson")
 CIRCOS_FILE = "circonscriptions-legislatives-p20.geojson"
-CIRCOS_VERSION = 1
+CIRCOS_VERSION = 2  # 2 : + départements des communes non rattachées (recherche par adresse partout)
 CIRCOS_DECIMALES = 5  # ≈ 1 m : bien plus fin que la précision de la source (généralisée à ~20 m)
 # Codes « Z » du ministère de l'Intérieur → codes de département de l'AN
 CIRCOS_DEPT_Z = {"ZA": "971", "ZB": "972", "ZC": "973", "ZD": "974", "ZM": "976", "ZS": "975",
@@ -1261,11 +1261,16 @@ def update_circos(out: Path, cache: Path, source_dir: Path | None, meta: dict, n
         if age < COMMUNES_MAX_AGE_DAYS:
             LOG.info("Contours : fichiers du %s conservés (%d j)", prev["majLe"][:10], age)
             return None
-    lignes = json.loads(communes_path.read_text(encoding="utf-8")).get("c", [])
+    doc_communes = json.loads(communes_path.read_text(encoding="utf-8"))
+    lignes = doc_communes.get("c", [])
     attendus: dict[str, set[int]] = defaultdict(set)  # département → circonscriptions des communes partagées
     for l in lignes:
         if len(l[4]) > 1:
             attendus[l[3]].update(l[4])
+    # Départements des communes non rattachées (créées après 2024) : leurs contours permettent de les résoudre
+    # par adresse. Toutes les circonscriptions du département sont publiées (on ne sait pas lesquelles sont en jeu).
+    for r in doc_communes.get("nonRattachees", []):
+        attendus.setdefault(r[3], set())
     src = (source_dir or cache) / CIRCOS_FILE
     if source_dir and not src.exists():
         LOG.info("Contours : %s absent, section ignorée", src)
