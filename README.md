@@ -115,6 +115,14 @@ Google Fonts ni à un CDN : l'adresse IP des visiteurs n'est transmise à aucun 
 copiés depuis les paquets npm figés dans `package.json` par `npm run vendor` (licences jointes, voir
 `assets/vendor/README.md`). Seules les photos des députés sont chargées depuis le site de l'Assemblée nationale.
 
+## Mentions légales et données personnelles
+
+Page `#/mentions` (lien dans le pied de page) : éditeur (particulier non professionnel, LCEN art. 6-III-2), hébergeur,
+sources, vie privée des visiteurs (aucun cookie ni mesure d'audience ; `localStorage` local ; journaux de GitHub ;
+photos chargées depuis l'Assemblée), données personnelles des députés (source, finalité, base légale, durée) et
+exercice des droits via les issues (modèle `.github/ISSUE_TEMPLATE/donnees-personnelles.md`, qui rappelle que les issues
+sont publiques). À mettre à jour si le site ajoute un traitement (statistiques, formulaire…).
+
 ## En local
 
 ```bash

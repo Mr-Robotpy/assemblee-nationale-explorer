@@ -127,7 +127,7 @@ function moreButton(id, shown, total) {
 }
 
 /* ---------------------------------------------------------------- routage */
-const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees', 'recherche', 'suivis'];
+const TABS = ['dashboard', 'deputes', 'lois', 'questions', 'scrutins', 'donnees', 'recherche', 'suivis', 'mentions'];
 let lastTab = 'dashboard';
 
 /* ---------------------------------------------------------------- filtres dans l'URL
@@ -248,6 +248,7 @@ function onNavigate() {
 }
 
 function showTab(tab) {
+    if (tab !== lastTab) window.scrollTo(0, 0);  // nouvelle page : en haut (sinon un lien du pied de page ouvre la page déjà défilée)
     lastTab = tab;
     document.querySelectorAll('.tab-content').forEach((el) => el.classList.toggle('hidden', el.id !== `tab-${tab}`));
     document.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
