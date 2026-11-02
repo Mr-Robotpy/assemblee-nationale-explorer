@@ -894,7 +894,30 @@ async function geocode(q, box) {
     const ask = (extra) => apiAdresse({ q, ...extra });
     let f = await ask({ citycode: box.dataset.insee });
     if (!f.length && box.dataset.cp) f = await ask({ postcode: box.dataset.cp });
-    return f[0] || null;
+    return f;
+}
+
+/* Confirmation de l'adresse trouvée. Le géocodeur renvoie toujours « la plus proche » : dans Lyon 7e,
+ * « 12 rue de la République » (2e arrondissement) devient « 12 Rue du Repos ». Si la voie ou le numéro trouvés
+ * diffèrent de la saisie (ANGeo.matchAddress), les candidats sont proposés et rien n'est affiché sans un clic ;
+ * sinon le résultat s'affiche directement, adresse reconnue en tête. Candidats sous le seuil de score : refusés. */
+function chooseAddress(out, q, feats, pick, refuse) {
+    const sure = feats.filter((f) => window.ANGeo.assessGeocode(f.properties, q, false).verdict === 'ok');
+    if (!sure.length) return refuse(feats[0] || null);
+    const m = sure.map((f) => ({ f, m: window.ANGeo.matchAddress(f.properties, q) }));
+    if (m[0].m.ok) return pick(sure[0]);
+    const cands = [...m.filter((x) => x.m.ok), ...m.filter((x) => !x.m.ok)].map((x) => x.f);  // les concordantes d'abord
+    out.innerHTML = `<div class="mt-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
+        <p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-circle-question mr-1"></i>${m[0].m.raison === 'numero'
+            ? 'Ce numéro n\'a pas été trouvé : la position serait celle de la voie, pas de votre numéro.'
+            : m[0].m.raison === 'codePostal' ? 'L\'adresse trouvée n\'a pas le code postal saisi.'
+            : 'L\'adresse trouvée ne correspond pas exactement à votre saisie.'} Confirmez votre adresse avant d'afficher le député :</p>
+        <div class="flex flex-col gap-1.5">${cands.map((f, i) => `<button type="button" data-pick="${i}"
+            class="btn-secondary !text-xs !justify-start text-left"><i class="fa-solid fa-location-dot"></i>${esc(f.properties.label)}</button>`).join('')}</div>
+        <p class="text-[11px] text-slate-500">Aucune ne correspond ? Corrigez l'adresse (numéro, voie, commune) et relancez la recherche.</p>
+    </div>`;
+    out.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pick(cands[Number(b.dataset.pick)])));
+    out.querySelector('[data-pick]').focus();
 }
 
 async function locate(box, lon, lat, label) {
@@ -947,22 +970,31 @@ function globalAddressForm(i) {
 
 const deptFromInsee = (code) => (/^97/.test(code) ? code.slice(0, 3) : code.slice(0, 2));
 
+const adresseIncertaine = (label) => `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse non reconnue avec certitude${label
+    ? ` (correspondance la plus proche : « ${esc(label)} »)` : ''}. Indiquez le numéro, la voie et la commune, ou utilisez la recherche par commune.
+    Wallis-et-Futuna et les adresses à l'étranger ne sont pas couverts par la recherche par adresse.</p>`;
+
 async function resolveAddress(q, out) {
     out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
-    let f;
+    let feats;
     try {
-        [f] = await apiAdresse({ q, limit: '1' });
+        feats = await apiAdresse({ q });
     } catch (err) {
         out.innerHTML = `<p class="text-xs text-rose-600">Service de localisation indisponible (${esc(err.message)}). Utilisez la recherche par commune ou code postal.</p>`;
         return;
     }
-    if (!f) {
+    if (!feats.length) {
         out.innerHTML = '<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable. Indiquez le numéro, la voie et la commune, ou utilisez la recherche par commune.</p>';
         return;
     }
+    await loadCommunes();
+    chooseAddress(out, q, feats, (f) => showAddress(f, q, out), (f) => { out.innerHTML = adresseIncertaine(f && f.properties.label); });
+}
+
+/** Député de l'adresse confirmée `f` (feature du géocodeur) ; `q` = saisie. */
+async function showAddress(f, q, out) {
     const { label, citycode, city } = f.properties || {};
     const [lon, lat] = f.geometry.coordinates;
-    await loadCommunes();
     const rows = communeRows() || [];
     const row = rows.find((r) => r[1] === citycode);
     const orphan = !row && ((state.communes && state.communes.nonRattachees) || []).find((r) => r[1] === citycode);
@@ -980,8 +1012,8 @@ async function resolveAddress(q, out) {
                 ? `Elle compte plusieurs circonscriptions : indiquez le numéro et le nom de la voie,
                    ou <a class="underline" href="#/recherche?q=${encodeURIComponent(citycode || city || '')}">voyez les députés de la commune</a>.`
                 : 'Sa circonscription n\'est connue qu\'à l\'adresse (commune créée ou modifiée depuis 2024) : indiquez le numéro et le nom de la voie.'}`
-            : `Adresse non reconnue avec certitude (correspondance la plus proche : « ${esc(label || '?')} »). Indiquez le numéro, la voie et la commune,
-               ou utilisez la recherche par commune. Wallis-et-Futuna et les adresses à l'étranger ne sont pas couverts par la recherche par adresse.`}</p>`;
+            : ''}</p>`;
+        if (verdict === 'incertain') out.innerHTML = adresseIncertaine(label);
         return;
     }
     let circ = null, dist = null, source = '';
@@ -1048,16 +1080,20 @@ function bindAddress() {
         const q = form.adresse.value.trim();
         out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
         try {
-            const f = await geocode(q, box);
-            const { verdict } = f ? window.ANGeo.assessGeocode(f.properties, q, true) : { verdict: 'incertain' };
-            if (verdict !== 'ok') {
-                out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">${f && verdict === 'commune'
-                    ? `Seule la commune a été reconnue : indiquez le numéro et le nom de la voie à ${esc(box.dataset.nom)}.`
-                    : `Adresse introuvable à ${esc(box.dataset.nom)}${f ? ` (correspondance la plus proche, trop incertaine : « ${esc(f.properties.label)} »)` : ''}. Ajoutez le numéro et le nom de la voie.`}</p>`;
-                return;
-            }
-            const [lon, lat] = f.geometry.coordinates;
-            await locate(box, lon, lat, f.properties.label);
+            const feats = await geocode(q, box);
+            const refuse = (f) => {
+                out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable à ${esc(box.dataset.nom)}${f
+                    ? ` (correspondance la plus proche, trop incertaine : « ${esc(f.properties.label)} »)` : ''}. Ajoutez le numéro et le nom de la voie.</p>`;
+            };
+            const pick = (f) => {
+                if (window.ANGeo.assessGeocode(f.properties, q, true).verdict === 'commune') {
+                    out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Seule la commune a été reconnue : indiquez le numéro et le nom de la voie à ${esc(box.dataset.nom)}.</p>`;
+                    return;
+                }
+                const [lon, lat] = f.geometry.coordinates;
+                return locate(box, lon, lat, f.properties.label);
+            };
+            chooseAddress(out, q, feats, pick, refuse);
         } catch (err) {
             out.innerHTML = `<p class="text-xs text-rose-600">Service de localisation indisponible (${esc(err.message)}). Réessayez plus tard, ou consultez votre carte électorale.</p>`;
         }
