@@ -45,8 +45,13 @@ Limites, affichées dans le bloc « Votre député par commune » (« Limites de
 - une commune ou un arrondissement partagé entre plusieurs circonscriptions affiche tous les députés concernés ;
   la circonscription exacte figure sur la carte électorale ;
 - les communes **créées ou modifiées après juin 2024** dans un département à plusieurs circonscriptions ne sont pas
-  rattachées (une vingtaine) : elles ne sont pas devinées, mais listées dans `communes.json` (`nonRattachees`) et
-  signalées comme telles si on les cherche. Le taux de couverture affiché est arrondi par défaut.
+  rattachées (8 en novembre 2026) : elles ne sont pas devinées, mais listées dans `communes.json` (`nonRattachees`),
+  signalées comme telles si on les cherche, et résolues par la recherche par adresse. Le taux de couverture affiché est
+  arrondi par défaut ;
+- les **territoires sans électeurs** (`sansElecteurs`) n'ont pas de bureau de vote, donc rien à rattacher : villages
+  détruits en 1916 dans la Meuse (population 0), Terres australes et antarctiques, Clipperton (aucune circonscription).
+  Ils sont exclus du taux de couverture et signalés comme tels. Seule une population explicitement nulle range une
+  commune ici : si l'API ne donne pas la population, la commune reste « non rattachée ».
 
 **Trouver son député par adresse**, quelle que soit la commune (champ distinct sur les pages Députés et Recherche) :
 l'adresse est géocodée par l'API Adresse ; si la commune n'a qu'une circonscription, la table des communes répond

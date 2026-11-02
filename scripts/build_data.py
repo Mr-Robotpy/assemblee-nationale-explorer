@@ -985,7 +985,7 @@ COMMUNES_FILES = {"bv": "resultats-definitifs-par-bureau-de-vote.csv",
                   "geo_arr": "arrondissements-geo.json"}
 COMMUNES_OPTIONAL = {"geo_arr"}  # sans elle : noms et codes postaux des arrondissements déduits
 COMMUNES_MAX_AGE_DAYS = 30
-COMMUNES_VERSION = 3  # à incrémenter quand le format change : force le recalcul malgré les 30 jours
+COMMUNES_VERSION = 4  # 4 : communes sans électeurs séparées. À incrémenter quand le format change : force le recalcul malgré les 30 jours
 
 # Paris, Lyon et Marseille votent par arrondissement : le numéro de bureau commence par le numéro
 # d'arrondissement (« 1102 » = 11e, bureau 02). code INSEE de la ville → (base des codes d'arrondissement, nombre, nom)
@@ -1119,7 +1119,7 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
     circs_par_dept: dict[str, set[int]] = defaultdict(set)
     for x in communes.values():
         circs_par_dept[x["dept"]].update(x["circs"])
-    lignes, vues, sans, total_geo = [], set(), [], 0
+    lignes, vues, sans, sans_electeurs, total_geo = [], set(), [], [], 0
     for g in geo:
         code, dep = g.get("code", ""), _dept_an(g.get("codeDepartement", ""))
         total_geo += _plm_arrondissement(code) is None  # couverture mesurée sur les communes, hors arrondissements
@@ -1127,9 +1127,16 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
         if x is None and len(circs_par_dept.get(dep, ())) == 1:  # département à circonscription unique
             x = {"nom": g.get("nom", ""), "dept": dep, "circs": set(circs_par_dept[dep])}
         if x is None:
-            # Commune actuelle absente du scrutin de juin 2024 (commune nouvelle, fusion, scission…) dans un
-            # département à plusieurs circonscriptions : on ne devine pas, on la liste.
-            sans.append([g.get("nom", ""), code, " ".join(sorted(set(g.get("codesPostaux") or []))), dep])
+            ligne = [g.get("nom", ""), code, " ".join(sorted(set(g.get("codesPostaux") or []))), dep]
+            if g.get("population") == 0 or not circs_par_dept.get(dep):
+                # Sans électeurs, donc sans bureau de vote : villages détruits en 1916 (Meuse, population 0),
+                # Terres australes et Clipperton (aucune circonscription). Rien à rattacher : hors couverture.
+                # Population absente (API incomplète) : pas de conclusion, la commune reste « non rattachée ».
+                sans_electeurs.append(ligne)
+            else:
+                # Commune actuelle absente du scrutin de juin 2024 (commune nouvelle, fusion, scission…) dans un
+                # département à plusieurs circonscriptions : on ne devine pas, on la liste.
+                sans.append(ligne)
             continue
         vues.add(code)
         ligne = [g.get("nom") or x["nom"], code, " ".join(sorted(set(g.get("codesPostaux") or []))), x["dept"],
@@ -1149,6 +1156,7 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
     stats = {"communes": len(lignes), "partagees": sum(1 for l in lignes if len(l[4]) > 1),
              "arrondissements": sum(1 for l in lignes if len(l) > 6), "version": COMMUNES_VERSION,
              "bureauxNonRelies": non_relies, "communesSansCorrespondance": len(sans),
+             "communesSansElecteurs": len(sans_electeurs),
              "circonscriptionsSansDepute": len(inconnues)}
     if inconnues:
         LOG.warning("Communes : %d circonscriptions sans député en exercice (sièges vacants ?) : %s",
@@ -1159,11 +1167,16 @@ def build_communes(bv_path: Path, circ_path: Path, geo: list[dict], deputes_keys
            "colonnes": ["nom", "codeInsee", "codesPostaux", "departement", "circonscriptions", "population",
                         "villeParente (arrondissements de Paris, Lyon, Marseille)"],
            "c": lignes,
-           # Limites exposées sur le site : communes actuelles sans circonscription connue.
-           "couverture": {"communes": total_geo, "rattachees": total_geo - len(sans), "nonRattachees": len(sans)},
-           "nonRattachees": sorted(sans, key=lambda r: (r[3], r[0]))}
+           # Limites exposées sur le site : communes actuelles (avec électeurs) sans circonscription connue.
+           "couverture": {"communes": total_geo - len(sans_electeurs), "rattachees": total_geo - len(sans_electeurs) - len(sans),
+                          "nonRattachees": len(sans), "sansElecteurs": len(sans_electeurs)},
+           "nonRattachees": sorted(sans, key=lambda r: (r[3], r[0])),
+           "sansElecteurs": sorted(sans_electeurs, key=lambda r: (r[3], r[0]))}
     if sans:
         LOG.info("Communes non rattachées (%d) : %s", len(sans), ", ".join(f"{r[0]} ({r[3]})" for r in sans[:20]))
+    if sans_electeurs:
+        LOG.info("Communes sans électeurs, hors couverture (%d) : %s", len(sans_electeurs),
+                 ", ".join(f"{r[0]} ({r[3]})" for r in sans_electeurs[:20]))
     return doc, stats
 
 
