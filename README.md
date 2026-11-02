@@ -60,6 +60,11 @@ Contrôle de la réponse du géocodeur (`ANGeo.assessGeocode`, testé) : en dess
 circonscriptions, le site demande la voie plutôt que de calculer sur le centre de la commune ; si la commune trouvée ne
 figure pas dans la saisie (« 12 rue de la paix » → Cherbourg), le résultat est affiché avec un avertissement.
 
+**Confirmation de l'adresse** (`ANGeo.matchAddress`, testé) : le géocodeur renvoie toujours l'adresse « la plus proche » ;
+dans Lyon 7e, « 8 rue Victor Hugo » (2e arrondissement) devient « 8 Rue Victor Lagrange ». Si la voie trouvée, le code
+postal ou le numéro diffèrent de la saisie (abréviations et accents ignorés), le site propose les candidats du géocodeur
+et n'affiche aucun député sans un clic de confirmation ; quand tout concorde, le résultat s'affiche directement.
+
 **Préciser avec son adresse** (communes et arrondissements partagés) : l'adresse est géocodée par l'API Adresse de
 l'État, servie par la Géoplateforme de l'IGN (`data.geopf.fr/geocodage` ; l'ancien hôte `api-adresse.data.gouv.fr` est
 déprécié depuis le 31 janvier 2026 et coupait régulièrement) — seul envoi à un tiers, déclenché par l'utilisateur à chaque recherche et annoncé à

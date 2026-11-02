@@ -1,5 +1,5 @@
 /* Recherche par adresse : point dans un polygone (GeoJSON, lon/lat), distance à la limite de circonscription la
- * plus proche, et contrôle de la réponse du géocodeur (assessGeocode). Script classique (pas de module) : expose window.ANGeo ; testé par
+ * plus proche, et contrôle de la réponse du géocodeur (assessGeocode, matchAddress). Script classique (pas de module) : expose window.ANGeo ; testé par
  * tests/geo.test.mjs (node --test). Aucune dépendance. */
 (function (root) {
     'use strict';
@@ -85,5 +85,34 @@
         return { verdict, autreCommune };
     }
 
-    root.ANGeo = { inRing, inPolygon, inGeometry, distanceToBoundaryM, findCirco, assessGeocode };
+    // Abréviations courantes des voies, développées des deux côtés avant comparaison.
+    const ABBR = { bd: 'boulevard', bld: 'boulevard', boul: 'boulevard', av: 'avenue', ave: 'avenue', r: 'rue', pl: 'place',
+        st: 'saint', ste: 'sainte', ch: 'chemin', chem: 'chemin', imp: 'impasse', all: 'allee', rte: 'route', fg: 'faubourg',
+        fbg: 'faubourg', sq: 'square', crs: 'cours', qu: 'quai', pass: 'passage', prom: 'promenade', mal: 'marechal',
+        gal: 'general', gen: 'general', pdt: 'president', res: 'residence', lot: 'lotissement', ham: 'hameau' };
+    const STOP = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'l', 'd', 'a', 'au', 'aux', 'et', 'en', 'sur', 'sous', 'voie']);
+    const words = (s) => fold(s).trim().split(' ').filter(Boolean).map((w) => ABBR[w] || w);
+
+    /**
+     * L'adresse trouvée est-elle celle qui a été saisie ? Tous les mots significatifs de la voie (ou de la localité)
+     * trouvée doivent figurer dans la saisie (« 12 rue de la République » → « 12 Rue du Repos » : non) ; si la saisie
+     * porte un code postal, c'est celui de l'adresse trouvée (« 8 rue Victor Hugo, 69007 » → 69002 : non) ; si elle porte
+     * un numéro, il doit avoir été trouvé (sinon la position est celle de la voie). Renvoie { ok, raison } avec raison
+     * 'voie', 'codePostal' ou 'numero'. En cas de doute (abréviation inconnue…) : ok = false, on demandera confirmation.
+     */
+    function matchAddress(props, query) {
+        const p = props || {};
+        if (p.type === 'municipality') return { ok: true };  // centre de commune : contrôlé par assessGeocode
+        const saisie = new Set(words(query));
+        const manque = words(p.street || p.locality || p.name || '')
+            .filter((w) => !STOP.has(w) && !/^\d+$/.test(w) && !saisie.has(w));
+        if (manque.length) return { ok: false, raison: 'voie' };
+        const cps = String(query || '').match(/\b\d{5}\b/g) || [];
+        if (cps.length && p.postcode && !cps.includes(String(p.postcode))) return { ok: false, raison: 'codePostal' };
+        const num = (String(query || '').replace(/\b\d{5}\b/g, ' ').match(/\b(\d{1,4})(?:\s*(?:bis|ter|quater|[a-d]))?\b/i) || [])[1];
+        if (num && (p.type !== 'housenumber' || parseInt(p.housenumber, 10) !== Number(num))) return { ok: false, raison: 'numero' };
+        return { ok: true };
+    }
+
+    root.ANGeo = { inRing, inPolygon, inGeometry, distanceToBoundaryM, findCirco, assessGeocode, matchAddress };
 })(typeof window !== 'undefined' ? window : globalThis);

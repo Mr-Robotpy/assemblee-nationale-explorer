@@ -77,3 +77,37 @@ test('géocodage : commune absente de la requête signalée', () => {
     const r = assessGeocode({ type: 'housenumber', score: 0.98, city: 'Cherbourg-en-Cotentin', postcode: '50100' }, '12 rue de la paix');
     assert.deepEqual({ ...r }, { verdict: 'ok', autreCommune: true });
 });
+
+// matchAddress : réponses réelles (Lyon 7e, citycode=69387, novembre 2026).
+const { matchAddress } = ctx.ANGeo;
+const hn = (street, housenumber, extra = {}) => ({ type: 'housenumber', street, housenumber, name: `${housenumber} ${street}`, ...extra });
+
+test('adresse : autre voie → confirmation (signalement « République » → « Repos »)', () => {
+    assert.deepEqual({ ...matchAddress(hn('Rue du Repos', '12'), '12 rue de la République') }, { ok: false, raison: 'voie' });
+    assert.equal(matchAddress(hn('Rue Victor Lagrange', '8'), '8 rue Victor Hugo').raison, 'voie');  // score 0,52 : passait le seuil
+});
+
+test('adresse : numéro introuvable → confirmation (position de la voie)', () => {
+    const p = { type: 'street', street: 'Rue Garibaldi', name: 'Rue Garibaldi' };
+    assert.equal(matchAddress(p, '15 rue Garibaldi').raison, 'numero');
+    assert.equal(matchAddress(p, 'rue Garibaldi, Lyon 69007').ok, true);   // code postal : pas un numéro
+});
+
+test('adresse : correspondance exacte malgré accents, abréviations, bis et commune', () => {
+    assert.equal(matchAddress(hn('Rue de la République', '12'), '12 r. de la republique, Lyon').ok, true);
+    assert.equal(matchAddress(hn('Boulevard Voltaire', '50'), '50 bd Voltaire 75011 Paris').ok, true);
+    assert.equal(matchAddress(hn("Rue de l'Université", '20'), '20 bis rue de l’Université').ok, true);
+    assert.equal(matchAddress({ type: 'street', street: 'Voie la canebiere', name: 'Voie la canebiere' }, 'La Canebière, Marseille').ok, true);
+});
+
+test('adresse : localité (ancienne commune) et centre de commune', () => {
+    assert.equal(matchAddress({ type: 'locality', locality: 'Pouilly-le-Monial', name: 'Pouilly-le-Monial' }, 'Pouilly-le-Monial 69400').ok, true);
+    assert.equal(matchAddress({ type: 'municipality', name: 'Lyon' }, 'Lyon').ok, true);
+});
+
+test('adresse : code postal saisi différent → confirmation', () => {
+    const p = hn('Rue Victor Hugo', '8', { postcode: '69002' });
+    assert.equal(matchAddress(p, '8 rue Victor Hugo, 69007 Lyon').raison, 'codePostal');
+    assert.equal(matchAddress(p, '8 rue Victor Hugo, 69002 Lyon').ok, true);
+    assert.equal(matchAddress(p, '8 rue Victor Hugo, Lyon').ok, true);
+});
