@@ -680,6 +680,15 @@ def _flatten_actes(node: Any, phase: str | None, ref: Referentiel, acc: list[dic
             _flatten_actes(children, this_phase, ref, acc)
 
 
+def _plus_actifs(dossiers: list[dict], n: int) -> list[dict]:
+    """Tous les projets de loi (Gouvernement, peu nombreux), complétés par les autres dossiers les plus récemment
+    actifs jusqu'à `n` ; ordre d'entrée conservé (dossiers triés du plus récent au plus ancien)."""
+    projets = [d for d in dossiers if d["categorie"] == "PJL"]
+    autres = [d for d in dossiers if d["categorie"] != "PJL"][:max(0, n - len(projets))]
+    keep = {d["uid"] for d in projets + autres}
+    return [d for d in dossiers if d["uid"] in keep]
+
+
 def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: set[str],
                    today: str | None = None) -> tuple[list[dict], dict[str, dict], dict]:
     """`today` (AAAA-MM-JJ, défaut : date UTC du jour) sépare les actes accomplis des actes programmés :
@@ -809,12 +818,10 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
         })
 
     built.sort(key=lambda x: (x["dateMaj"] or "", x["uid"]), reverse=True)
-    # Tous les projets de loi (Gouvernement, peu nombreux) sont publiés ; les propositions et autres
-    # procédures complètent, des plus récemment actives aux plus anciennes, jusqu'au plafond.
-    projets = [b for b in built if b["categorie"] == "PJL"]
-    autres = [b for b in built if b["categorie"] != "PJL"][:max(0, max_dossiers - len(projets))]
-    keep = {b["uid"] for b in projets + autres}
-    built = [b for b in built if b["uid"] in keep]
+    # max_dossiers <= 0 (défaut) : tous les dossiers de la législature, pour que la recherche trouve tout
+    # (≈ 3 400, index ≈ 2 Mo brut). Plafond éventuel : tous les projets de loi, puis les plus récemment actifs.
+    if max_dossiers > 0:
+        built = _plus_actifs(built, max_dossiers)
     index = [{k: b[k] for k in ("uid", "titre", "procedure", "categorie", "initiateurs", "nbInitiateurs", "dateDepot",
                                  "dateMaj", "etape", "derniereEtape", "prochaineEtape", "statut", "statutDecision",
                                  "procedureAcceleree", "resume")}
@@ -832,10 +839,14 @@ def build_dossiers(path: Path, ref: Referentiel, max_dossiers: int, categories: 
     return index, by_uid, meta
 
 
-def fetch_fulltexts(dossiers: dict[str, dict], textes_dir: Path, max_new: int, delay: float) -> int:
-    """Récupère (une seule fois) le texte intégral du texte principal des dossiers affichés."""
+def fetch_fulltexts(dossiers: dict[str, dict], textes_dir: Path, max_new: int, delay: float, perimetre: int = 400) -> int:
+    """Récupère (une seule fois) le texte intégral du texte principal des dossiers du périmètre : tous les projets
+    de loi et les dossiers les plus récemment actifs, jusqu'à `perimetre` (0 = tous). Les autres dossiers renvoient
+    au texte officiel sur le site de l'Assemblée ; leurs textes déjà archivés sont supprimés."""
     textes_dir.mkdir(parents=True, exist_ok=True)
-    ordered = sorted(dossiers.values(), key=lambda d: d.get("dateMaj") or "", reverse=True)
+    ordered = sorted(dossiers.values(), key=lambda d: (d.get("dateMaj") or "", d["uid"]), reverse=True)
+    if perimetre > 0:
+        ordered = _plus_actifs(ordered, perimetre)
     wanted = [d["textePrincipal"] for d in ordered if d.get("textePrincipal") and "ANR5" in d["textePrincipal"]]
     wanted_set = set(wanted)
     for f in textes_dir.glob("*.json"):  # nettoyage des textes qui ne sont plus référencés
@@ -1337,14 +1348,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="data", type=Path)
     ap.add_argument("--cache", default=".cache", type=Path)
     ap.add_argument("--source-dir", type=Path, help="dossier contenant les ZIP officiels (pas de téléchargement)")
-    ap.add_argument("--max-dossiers", type=int, default=int(os.environ.get("MAX_DOSSIERS", 400)))
+    ap.add_argument("--max-dossiers", type=int, default=int(os.environ.get("MAX_DOSSIERS", 0)),
+                    help="dossiers publiés (0 = tous, défaut)")
+    ap.add_argument("--max-textes", type=int, default=int(os.environ.get("MAX_TEXTES", 400)),
+                    help="textes intégraux archivés : projets de loi + dossiers les plus récemment actifs (0 = tous)")
     ap.add_argument("--max-scrutins", type=int, default=int(os.environ.get("MAX_SCRUTINS", 300)))
     ap.add_argument("--max-qe", type=int, default=int(os.environ.get("MAX_QE", 3000)), help="questions écrites (0 = toutes)")
     ap.add_argument("--max-qg", type=int, default=int(os.environ.get("MAX_QG", 1500)), help="questions au Gouvernement (0 = toutes)")
     ap.add_argument("--max-qosd", type=int, default=int(os.environ.get("MAX_QOSD", 800)), help="questions orales (0 = toutes)")
     ap.add_argument("--fulltext-per-run", type=int, default=int(os.environ.get("FULLTEXT_PER_RUN", 60)))
     ap.add_argument("--no-fulltext", action="store_true")
-    ap.add_argument("--all-procedures", action="store_true", help="inclure résolutions, commissions d'enquête…")
+    ap.add_argument("--lois-seulement", action="store_true",
+                    help="exclure les autres procédures (résolutions, commissions d'enquête…), incluses par défaut")
     ap.add_argument("--no-communes", action="store_true", help="ne pas construire la table commune → circonscription")
     ap.add_argument("--force-communes", action="store_true", help="reconstruire la table des communes même récente")
     ap.add_argument("--force-circos", action="store_true", help="republier les contours de circonscriptions même récents")
@@ -1388,11 +1403,11 @@ def main(argv: list[str] | None = None) -> int:
     dossiers_meta = {}
     if "dossiers" in src:
         try:
-            cats = {"PJL", "PPL", "AUTRE"} if args.all_procedures else {"PJL", "PPL"}
+            cats = {"PJL", "PPL"} if args.lois_seulement else {"PJL", "PPL", "AUTRE"}
             index, by_uid, dossiers_meta = build_dossiers(src["dossiers"], ref, args.max_dossiers, cats)
             n_txt = 0
             if not args.no_fulltext and not args.source_dir:
-                n_txt = fetch_fulltexts(by_uid, out / "textes", args.fulltext_per_run, delay=1.0)
+                n_txt = fetch_fulltexts(by_uid, out / "textes", args.fulltext_per_run, delay=1.0, perimetre=args.max_textes)
             else:
                 for d in by_uid.values():
                     d["texteIntegral"] = bool(d.get("textePrincipal")) and (out / "textes" / f"{d['textePrincipal']}.json").exists()
@@ -1404,7 +1419,8 @@ def main(argv: list[str] | None = None) -> int:
             write_json(out / "dossiers.json", index)
             LOG.info("Dossiers : %d publiés, %d textes intégraux récupérés", len(index), n_txt)
             meta["sections"]["dossiers"] = {"majLe": now, "affiches": len(index), "total": dossiers_meta["total"],
-                                            "textesRecuperes": n_txt}
+                                            "textesRecuperes": n_txt, "textesPerimetre": args.max_textes,
+                                            "textesArchives": sum(1 for d in by_uid.values() if d["texteIntegral"])}
         except Exception:
             LOG.exception("Échec section dossiers")
             failures.append("dossiers")

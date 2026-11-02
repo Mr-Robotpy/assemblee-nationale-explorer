@@ -606,7 +606,8 @@ function renderBills() {
         b.querySelector('.step-count').textContent = `${fmtNum(parEtape[b.dataset.step - 1])} texte(s)`;
     });
     const etape = state.loiStep ? ` à l'étape « ${STEP_LABELS[state.loiStep - 1]} »` : '';
-    $('#loisCount').textContent = `${fmtNum(list.length)} dossiers affichés${etape} — tous les projets de loi, et les propositions les plus récemment actives`;
+    $('#loisCount').textContent = `${fmtNum(list.length)} dossier(s)${etape}${dossiersComplets()
+        ? ' — tous les dossiers de la législature' : ' — tous les projets de loi, et les propositions les plus récemment actives'}`;
     const el = $('#billsList');
     if (!list.length) { el.innerHTML = emptyState('Aucun texte ne correspond.'); moreButton('#billsMore', 0, 0); return; }
     el.innerHTML = list.slice(0, state.shown.lois).map((d) => `
@@ -745,20 +746,29 @@ function bindSearch() {
 }
 
 const sumTotals = (obj) => Object.entries(obj || {}).filter(([k]) => !k.endsWith('_promulgues')).reduce((a, [, v]) => a + v, 0);
+/** Tous les dossiers de la législature sont publiés (défaut du pipeline ; un plafond MAX_DOSSIERS le désactive). */
+const dossiersComplets = () => {
+    const sec = (state.meta && state.meta.sections && state.meta.sections.dossiers) || {};
+    return state.dossiers.length > 0 && state.dossiers.length >= sumTotals(sec.total);
+};
 
 function searchGroups() {
     const sec = (state.meta && state.meta.sections) || {};
     return [
         {
             key: 'deputes', title: 'Députés', icon: 'fa-users', items: state.deputes, primary: (d) => `${d.prenom} ${d.nom}`,
-            complete: true, scope: () => `parmi les ${fmtNum(state.deputes.length)} députés en exercice (liste complète)`,
+            complete: true, empty: 'Aucun député en exercice ne correspond.',
+            scope: () => `parmi les ${fmtNum(state.deputes.length)} députés en exercice (liste complète)`,
             render: (d) => `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2.5 flex items-center gap-3">${avatar(d, 'w-9 h-9')}
                 <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
                 <span class="block text-xs text-slate-500 truncate">${esc(d.departement)} (${esc(d.numDepartement)}) · ${ordinal(d.circo)} circonscription</span></span></a>`,
         },
         {
             key: 'lois', title: 'Lois', icon: 'fa-file-contract', items: state.dossiers, primary: (d) => d.titre,
-            complete: false, scope: () => `parmi les ${fmtNum(state.dossiers.length)} dossiers publiés, sur ${fmtNum(sumTotals(sec.dossiers && sec.dossiers.total))} dans la législature`,
+            complete: dossiersComplets(), empty: 'Aucun dossier de la législature ne correspond.',
+            scope: () => (dossiersComplets()
+                ? `parmi les ${fmtNum(state.dossiers.length)} dossiers de la législature (liste complète)`
+                : `parmi les ${fmtNum(state.dossiers.length)} dossiers publiés, sur ${fmtNum(sumTotals(sec.dossiers && sec.dossiers.total))} dans la législature`),
             render: (d) => `<a href="#/dossier/${esc(d.uid)}" class="row-link !p-2.5">
                 <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500">${statusBadge(d.statut, d.etape, d.statutDecision)}<span>${fmtShort(d.dateMaj)}</span></span>
                 <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(d.titre)}</span></a>`,
@@ -810,7 +820,7 @@ function renderSearch(q) {
         total += hits.length;
         const scope = `<p class="text-xs text-slate-500">${fmtNum(hits.length)} résultat(s) ${g.scope()}.</p>`;
         const empty = g.complete
-            ? '<p class="text-sm text-slate-500">Aucun député en exercice ne correspond.</p>'
+            ? `<p class="text-sm text-slate-500">${esc(g.empty)}</p>`
             : `<p class="text-sm text-slate-500">Aucun résultat dans la sélection publiée. Ce n'est pas une absence dans les archives :
                 <a class="text-blue-600 dark:text-blue-400 hover:underline" href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener">archives complètes ↗</a></p>`;
         return `<div class="card space-y-3">${head}${scope}
@@ -1556,8 +1566,13 @@ function renderDossierDetail(d) {
     <div id="fullTextBox" class="text-sm">
         ${d.texteIntegral
         ? `<button id="fullTextBtn" class="btn-primary"><i class="fa-solid fa-file-lines"></i>Lire le texte intégral (exposé des motifs et articles)</button>`
-        : `<p class="text-xs text-slate-500">Texte intégral non encore archivé localement${principal && principal.liens && principal.liens.pdf ? ' — consultez la version officielle :' : '.'}</p>`}
-        ${principal && principal.liens && principal.liens.pdf ? `<div class="flex flex-wrap gap-2 mt-2">${linkBtn(principal.liens.html, 'Texte (HTML officiel)')}${linkBtn(principal.liens.pdf, 'PDF officiel', 'fa-file-pdf')}</div>` : ''}
+        : `<p class="text-xs text-slate-500">Texte intégral non archivé sur ce site : seuls le sont les projets de loi et les dossiers les plus récemment
+            actifs (ajoutés au fil des mises à jour). ${principal && principal.liens && principal.liens.pdf
+                ? 'Version officielle sur le site de l\'Assemblée :' : 'Le texte est accessible depuis le dossier officiel :'}</p>`}
+        ${principal && principal.liens && principal.liens.pdf
+        ? `<div class="flex flex-wrap gap-2 mt-2">${linkBtn(principal.liens.html, 'Texte (HTML officiel)')}${linkBtn(principal.liens.pdf, 'PDF officiel', 'fa-file-pdf')}</div>`
+        // Texte sans version AN (déposé au Sénat) : renvoi aux dossiers officiels, pas seulement en bas de fiche.
+        : !d.texteIntegral && d.liens ? `<div class="flex flex-wrap gap-2 mt-2">${linkBtn(d.liens.an, 'Dossier à l\'Assemblée')}${linkBtn(d.liens.senat, 'Dossier au Sénat')}</div>` : ''}
     </div>
 
     <h4 class="section-title">Parcours législatif</h4>
