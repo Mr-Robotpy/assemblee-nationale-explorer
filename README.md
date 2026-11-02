@@ -22,7 +22,7 @@ Open Data AN (ZIP JSON) ──► scripts/build_data.py ──► data/*.json �
 | `data/groupes.json` | groupes politiques (couleurs officielles, sièges, parité) |
 | `data/dossiers.json`, `data/dossiers/<DLR…>.json` | dossiers de loi + parcours législatif complet : dernière étape **accomplie**, prochaine étape **programmée** (agenda), statut situé (« Adopté au Sénat — examen à l'Assemblée en cours ») |
 | `data/textes/<uid>.json` | texte intégral (exposé des motifs + articles), récupéré une seule fois puis mis en cache |
-| `data/questions.json`, `data/questions/<QANR…>.json` | questions récentes + texte de la question et de la réponse |
+| `data/questions.json`, `data/questions/<QANR…>.json` | **toutes** les questions (index en colonnes) + fiches des récentes (texte de la question et de la réponse) |
 | `data/scrutins.json` | derniers scrutins, résultats par groupe |
 | `data/communes.json` | « trouver mon député » : commune → circonscription(s), codes postaux (voir ci-dessous) |
 
@@ -89,7 +89,9 @@ les 30 jours.
 
 Volumes publiés (modifiables via variables d'environnement ou options CLI) : **tous** les dossiers de la législature
 (≈ 3 400 : projets et propositions de loi, résolutions, commissions d'enquête… ; index ≈ 2,2 Mo brut, ≈ 220 Ko
-compressé), 300 scrutins, 3 000 questions écrites, 1 500 questions au Gouvernement, 800 questions orales.
+compressé), **toutes** les questions (≈ 22 000), 300 scrutins. Fiches détaillées des questions (texte et réponse)
+pour les plus récentes : 3 000 écrites, 1 500 au Gouvernement, 800 orales (`MAX_QE`, `MAX_QG`, `MAX_QOSD`) ; pour les
+autres, une fiche légère tirée de l'index renvoie à la page officielle de l'Assemblée.
 Textes intégraux archivés pour tous les projets de loi et les dossiers les plus récemment actifs, 400 au total
 (`MAX_TEXTES` / `--max-textes`, 60 nouveaux par passage) ; pour les autres, la fiche renvoie au texte officiel
 (HTML et PDF de l'Assemblée, ou dossiers de l'Assemblée et du Sénat pour un texte déposé au Sénat). Les statistiques (participation,
@@ -107,10 +109,13 @@ nombre de questions…) sont calculées sur **toute** la législature.
 
 ### Pourquoi plafonner le volume ?
 
-Les dossiers sont tous publiés (index léger, quelques centaines de Ko compressés). L'index des questions est chargé
-à la première ouverture de l'onglet Questions ; avec toutes les questions écrites
-de la législature (plus de 20 000), il pèserait plusieurs Mo (estimation) et rendrait l'onglet lent sur mobile. Les plafonds
-ne concernent que l'affichage : les compteurs et statistiques couvrent toute la législature.
+Les dossiers sont tous publiés (index léger, ≈ 220 Ko compressés). Les questions aussi, dans un index **en colonnes**
+(`compact_questions`, format 2) : auteurs, groupes, ministères, rubriques et statuts rangés une fois dans des tables et
+référencés par indice, uid déduit du type et du numéro. Mesuré en novembre 2026 : 22 050 questions, 2,6 Mo brut et
+≈ 690 Ko compressé, contre 7,6 Mo dans l'ancien format objet. L'index est chargé à la première ouverture de l'onglet
+Questions (ou d'une recherche) ; le texte de recherche de chaque élément est calculé une fois puis mis en cache. Seules
+les fiches détaillées restent plafonnées (≈ 155 Mo pour toutes) ; les scrutins restent plafonnés (PR suivante). Les
+compteurs et statistiques couvrent toute la législature.
 
 ## Liens partageables
 
@@ -127,8 +132,8 @@ les boutons Précédent / Suivant du navigateur parcourent les recherches, et «
 
 La recherche (champ de l'en-tête, raccourci `/`) exige que **tous les mots** apparaissent, sans tenir compte des accents
 ni des majuscules — la même règle que les listes, pour que « Voir les N résultats » ouvre une liste de N éléments.
-Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice, dossiers de loi) ou
-**sélection publiée** (questions, scrutins), avec le total de la législature. Le statut « liste complète » des lois est
+Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice, dossiers de loi, questions)
+ou **sélection publiée** (scrutins), avec le total de la législature. Le statut « liste complète » des lois est
 calculé (publiés ≥ total de la législature) : il disparaît si un plafond `MAX_DOSSIERS` est fixé.
 
 ## Suivis
@@ -177,7 +182,7 @@ node --test tests/*.test.mjs           # tests de géométrie (recherche par adr
 npm ci && npm run build:css           # uniquement si vous modifiez les classes Tailwind
 ```
 
-Options utiles : `--max-qe 0` (toutes les questions écrites), `--lois-seulement` (exclut résolutions, commissions
+Options utiles : `--max-qe 0` (fiches de toutes les questions écrites), `--lois-seulement` (exclut résolutions, commissions
 d'enquête…, incluses par défaut), `--max-dossiers N` (plafond, 0 = tous par défaut), `--max-textes N`, `--no-fulltext`,
 `--source-dir <dossier de ZIP>` (hors ligne).
 

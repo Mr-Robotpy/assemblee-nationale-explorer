@@ -87,8 +87,10 @@ class BuildDataTest(unittest.TestCase):
         self.assertTrue(any(doc["uid"] == "PRJLANR5L17B0004" and doc["titre"] for doc in d["documents"]))
 
     def test_questions(self):
-        qs = self.load("questions.json")
-        self.assertEqual({q["type"] for q in qs}, {"QE", "QG"})
+        doc = self.load("questions.json")
+        self.assertEqual(doc["format"], bd.QUESTIONS_FORMAT)
+        self.assertEqual({l[0] for l in doc["q"]}, {"QE", "QG"})
+        self.assertTrue(all(l[11] == 1 for l in doc["q"]))  # sous les plafonds : toutes ont une fiche
         qg = self.load("questions/QANR5L17QG1.json")
         html = qg["reponse"][0]["html"]
         self.assertIn("<strong>", html)
@@ -104,6 +106,46 @@ class BuildDataTest(unittest.TestCase):
         meta = self.load("meta.json")
         self.assertIn("generation", meta)
         self.assertEqual(meta["sections"]["deputes"]["total"], 6)
+
+
+class QuestionsCompactesTest(unittest.TestCase):
+    def q(self, uid, type_, num, **kw):
+        base = {"uid": uid, "type": type_, "numero": num, "date": "2026-01-02", "rubrique": "santé", "titre": f"T{num}",
+                "auteur": "Marie Curie", "auteurUid": "PA1", "groupe": "EPR", "ministere": "Santé",
+                "statut": "Répondue", "repondue": True, "dateReponse": "2026-02-03"}
+        return base | kw
+
+    def test_format_en_colonnes(self):
+        index = [self.q("QANR5L17QE10", "QE", "10"),
+                 self.q("QANR5L17QG2", "QG", "2", rubrique=None, groupe=None, ministere=None, auteur="X", auteurUid=None,
+                        statut="En attente de réponse", repondue=False, dateReponse=None),
+                 self.q("UID-ATYPIQUE", "QE", "11")]
+        doc = bd.compact_questions(index, {"QANR5L17QE10"})
+        self.assertEqual(doc["colonnes"], bd.QUESTIONS_COLONNES)
+        self.assertEqual(doc["auteurs"], [["PA1", "Marie Curie"], [None, "X"]])
+        self.assertEqual(doc["statuts"], ["Répondue", "En attente de réponse"])
+        a, b, c = doc["q"]
+        self.assertEqual(a, ["QE", "10", "2026-01-02", 0, "T10", 0, 0, 0, 0, 1, "2026-02-03", 1])
+        self.assertEqual(b, ["QG", "2", "2026-01-02", -1, "T2", 1, -1, -1, 1, 0, None, 0])  # absents : -1
+        self.assertEqual(c[12], "UID-ATYPIQUE")  # uid hors modèle : ajouté en fin de ligne
+        self.assertEqual(len(a), len(bd.QUESTIONS_COLONNES))
+
+    def test_plafond_limite_les_fiches_pas_l_index(self):
+        """Plafond QE = 1 : la question écrite la plus ancienne reste dans l'index, sans fiche détaillée."""
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "qe"
+            src.mkdir()
+            brut = (FIX / "qe" / "QANR5L17QE1234.json").read_text(encoding="utf-8")
+            (src / "QANR5L17QE1234.json").write_text(brut, encoding="utf-8")
+            vieille = brut.replace("QANR5L17QE1234", "QANR5L17QE99").replace('"1234"', '"99"').replace("2024-11-05", "2024-08-01")
+            (src / "QANR5L17QE99.json").write_text(vieille, encoding="utf-8")
+            zq = Path(t) / "qe.zip"
+            make_zip(src, zq)
+            index, details, meta = bd.build_questions({"QE": zq}, bd.Referentiel(), {"QE": 1})
+            self.assertEqual(sorted(q["uid"] for q in index), ["QANR5L17QE1234", "QANR5L17QE99"])  # toutes dans l'index
+            self.assertEqual(set(details), {"QANR5L17QE1234"})                                       # fiche : la plus récente
+            doc = bd.compact_questions(index, set(details))
+            self.assertEqual({l[1]: l[11] for l in doc["q"]}, {"1234": 1, "99": 0})
 
 
 class DossiersCompletsTest(unittest.TestCase):

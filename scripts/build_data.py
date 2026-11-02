@@ -957,10 +957,13 @@ def build_questions(paths: dict[str, Path], ref: Referentiel, max_per_type: dict
                 "liens": {"an": f"https://questions.assemblee-nationale.fr/q{LEGISLATURE}/{LEGISLATURE}-{num}{qtype}.htm" if num else None},
             }))
         rows.sort(key=lambda r: (r[0]["date"] or "", int(r[0]["numero"] or 0)), reverse=True)
+        # Index : toutes les questions (la recherche trouve tout). Fiches détaillées (texte de la question et de la
+        # réponse) : les plus récentes seulement, jusqu'au plafond du type ; les autres renvoient à la page de l'AN.
         limit = max_per_type.get(qtype_key, 0)
-        for s, d in rows[:limit] if limit else rows:
+        for i, (s, d) in enumerate(rows):
             index.append(s)
-            details[s["uid"]] = d
+            if not limit or i < limit:
+                details[s["uid"]] = d
     index.sort(key=lambda s: (s["date"] or "", s["uid"]), reverse=True)
     meta = {
         "total": dict(stats["total"]),
@@ -970,6 +973,42 @@ def build_questions(paths: dict[str, Path], ref: Referentiel, max_per_type: dict
         "parDepute": dict(stats["parDepute"]),
     }
     return index, details, meta
+
+
+QUESTIONS_FORMAT = 2
+QUESTIONS_COLONNES = ["type", "numero", "date", "rubrique (indice)", "titre", "auteur (indice)", "groupe (indice)",
+                      "ministere (indice)", "statut (indice)", "repondue (0/1)", "dateReponse", "fiche (0/1)"]
+
+
+def compact_questions(index: list[dict], avec_fiche: set[str]) -> dict:
+    """Index des questions en colonnes (≈ 22 000 lignes) : auteurs, groupes, ministères, rubriques et statuts sont
+    rangés une fois dans des tables et référencés par leur indice (-1 = absent). L'uid se déduit du type et du
+    numéro (QANR5L17QE19365) ; s'il ne suit pas ce modèle, il est ajouté en fin de ligne. « fiche » : une fiche
+    détaillée questions/<uid>.json existe (questions récentes) ; sinon le site renvoie à la page de l'AN."""
+    tables: dict[str, dict] = {k: {} for k in ("auteurs", "groupes", "ministeres", "rubriques", "statuts")}
+
+    def idx(table: str, key: Any, value: Any = None) -> int:
+        if key in (None, ""):
+            return -1
+        t = tables[table]
+        if key not in t:
+            t[key] = (len(t), value if value is not None else key)
+        return t[key][0]
+
+    lignes = []
+    for q in index:
+        ligne = [q["type"], q["numero"], q["date"], idx("rubriques", q["rubrique"]), q["titre"],
+                 idx("auteurs", q["auteurUid"] or q["auteur"], [q["auteurUid"], q["auteur"]]),
+                 idx("groupes", q["groupe"]), idx("ministeres", q["ministere"]), idx("statuts", q["statut"]),
+                 int(q["repondue"]), q["dateReponse"], int(q["uid"] in avec_fiche)]
+        if q["uid"] != f"QANR5L{LEGISLATURE}{q['type']}{q['numero']}":
+            ligne.append(q["uid"])
+        lignes.append(ligne)
+    out = {"format": QUESTIONS_FORMAT, "legislature": LEGISLATURE, "colonnes": QUESTIONS_COLONNES}
+    for k, t in tables.items():
+        out[k] = [v for _, v in sorted(t.values(), key=lambda x: x[0])]
+    out["q"] = lignes
+    return out
 
 
 # --------------------------------------------------------------------------- communes → circonscriptions
@@ -1353,9 +1392,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-textes", type=int, default=int(os.environ.get("MAX_TEXTES", 400)),
                     help="textes intégraux archivés : projets de loi + dossiers les plus récemment actifs (0 = tous)")
     ap.add_argument("--max-scrutins", type=int, default=int(os.environ.get("MAX_SCRUTINS", 300)))
-    ap.add_argument("--max-qe", type=int, default=int(os.environ.get("MAX_QE", 3000)), help="questions écrites (0 = toutes)")
-    ap.add_argument("--max-qg", type=int, default=int(os.environ.get("MAX_QG", 1500)), help="questions au Gouvernement (0 = toutes)")
-    ap.add_argument("--max-qosd", type=int, default=int(os.environ.get("MAX_QOSD", 800)), help="questions orales (0 = toutes)")
+    # L'index publie toutes les questions ; ces plafonds ne limitent que les fiches détaillées (texte et réponse).
+    ap.add_argument("--max-qe", type=int, default=int(os.environ.get("MAX_QE", 3000)), help="fiches de questions écrites (0 = toutes)")
+    ap.add_argument("--max-qg", type=int, default=int(os.environ.get("MAX_QG", 1500)), help="fiches de questions au Gouvernement (0 = toutes)")
+    ap.add_argument("--max-qosd", type=int, default=int(os.environ.get("MAX_QOSD", 800)), help="fiches de questions orales (0 = toutes)")
     ap.add_argument("--fulltext-per-run", type=int, default=int(os.environ.get("FULLTEXT_PER_RUN", 60)))
     ap.add_argument("--no-fulltext", action="store_true")
     ap.add_argument("--lois-seulement", action="store_true",
@@ -1443,8 +1483,10 @@ def main(argv: list[str] | None = None) -> int:
             reset_dir(out / "questions")
             for uid, q in q_details.items():
                 write_json(out / "questions" / f"{uid}.json", q)
-            write_json(out / "questions.json", q_index)
-            meta["sections"]["questions"] = {"majLe": now, "affiches": len(q_index), "total": q_meta["total"],
+            write_json(out / "questions.json", compact_questions(q_index, set(q_details)))
+            LOG.info("Questions : %d dans l'index, %d fiches détaillées", len(q_index), len(q_details))
+            meta["sections"]["questions"] = {"majLe": now, "affiches": len(q_index), "fiches": len(q_details),
+                                             "format": QUESTIONS_FORMAT, "total": q_meta["total"],
                                              "repondues": q_meta["repondues"], "ministeres": q_meta["ministeres"],
                                              "rubriques": q_meta["rubriques"]}
             recent_by_dep: dict[str, list] = defaultdict(list)

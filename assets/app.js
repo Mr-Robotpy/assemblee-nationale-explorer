@@ -28,8 +28,32 @@ async function loadLists(keys) {
     const results = await Promise.allSettled(keys.map((k) => getJSON(LISTS[k])));
     results.forEach((r, i) => {
         const k = keys[i];
-        if (r.status === 'fulfilled') { state[k] = r.value; delete state.failed[k]; if (k === 'deputes') state.deputesParCirco = null; }
+        if (r.status === 'fulfilled') {
+            state[k] = k === 'questions' ? expandQuestions(r.value) : r.value;
+            delete state.failed[k];
+            if (k === 'deputes') state.deputesParCirco = null;
+        }
         else { state[k] = []; state.failed[k] = r.reason && r.reason.message ? r.reason.message : 'erreur réseau'; }
+    });
+}
+
+/* Index des questions : format en colonnes (format 2, toutes les questions de la législature, ≈ 22 000 lignes ;
+ * tables auteurs / groupes / ministères / rubriques / statuts, voir compact_questions dans build_data.py), ou ancien
+ * format (liste d'objets, questions récentes seulement, toutes avec fiche). Rendu : objets de l'ancien format,
+ * plus `fiche` (fiche détaillée publiée) et `lienAN` (page officielle). */
+const QUESTION_AN = (leg, x) => `https://questions.assemblee-nationale.fr/q${leg}/${leg}-${x.numero}${x.type}.htm`;
+function expandQuestions(doc) {
+    if (Array.isArray(doc)) return doc.map((x) => ({ ...x, fiche: true, lienAN: QUESTION_AN('17', x) }));
+    const leg = doc.legislature || '17';
+    const at = (table, i) => (i >= 0 ? doc[table][i] : null);
+    return (doc.q || []).map((l) => {
+        const [type, numero, date, rub, titre, aut, grp, min, st, rep, dateReponse, fiche, uid] = l;
+        const auteur = at('auteurs', aut) || [null, null];
+        const x = { uid: uid || `QANR5L${leg}${type}${numero}`, type, numero, date, rubrique: at('rubriques', rub), titre,
+            auteur: auteur[1] || auteur[0], auteurUid: auteur[0], groupe: at('groupes', grp), ministere: at('ministeres', min),
+            statut: at('statuts', st) || (rep ? 'Répondue' : 'En attente de réponse'), repondue: !!rep, dateReponse, fiche: !!fiche };
+        x.lienAN = QUESTION_AN(leg, x);
+        return x;
     });
 }
 
@@ -55,8 +79,8 @@ const tokens = (q) => norm(q).split(/[\s'’,;:.!?()«»"-]+/).filter((t) => t.l
 const matches = (hay, toks) => toks.every((t) => hay.includes(t));
 const HAY = {
     deputes: (d) => norm(`${d.prenom} ${d.nom} ${d.departement} ${d.numDepartement} ${d.groupe} ${d.circo}e circonscription`),
-    lois: (d) => norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`),
-    questions: (x) => norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`),
+    lois: (d) => d._hay || (d._hay = norm(`${d.titre} ${d.resume} ${(d.initiateurs || []).join(' ')} ${d.procedure}`)),
+    questions: (x) => x._hay || (x._hay = norm(`${x.titre} ${x.rubrique} ${x.auteur} ${x.groupe} ${x.ministere} ${x.numero}`)),
     scrutins: (x) => norm(`${x.titre} ${x.numero} ${x.demandeur}`),
 };
 /** 1 → « 1<sup>re</sup> », 2 → « 2<sup>e</sup> » (circonscriptions). */
@@ -632,7 +656,7 @@ function renderBills() {
 }
 
 /* ---------------------------------------------------------------- questions */
-// Index le plus lourd (plusieurs Mo) : chargé seulement à la première visite de l'onglet.
+// Index le plus lourd (≈ 2,6 Mo brut, ≈ 700 Ko compressé, toutes les questions) : chargé à la première visite de l'onglet.
 let questionsLoading = null;
 function loadQuestions() {
     if (questionsLoading) return questionsLoading;
@@ -658,7 +682,9 @@ function renderQuestions() {
     const list = filteredQuestions();
     const tot = (state.meta && state.meta.sections.questions && state.meta.sections.questions.total) || {};
     const total = Object.values(tot).reduce((a, b) => a + b, 0);
-    $('#questionsCount').textContent = `${fmtNum(list.length)} questions affichées (les plus récentes) sur ${fmtNum(total)} posées depuis le début de la législature`;
+    $('#questionsCount').textContent = questionsCompletes()
+        ? `${fmtNum(list.length)} question(s) — toutes celles de la législature (${fmtNum(total)})`
+        : `${fmtNum(list.length)} questions affichées (les plus récentes) sur ${fmtNum(total)} posées depuis le début de la législature`;
     const el = $('#questionsContainer');
     if (!list.length) { el.innerHTML = emptyState('Aucune question ne correspond à votre recherche.'); moreButton('#questionsMore', 0, 0); return; }
     el.innerHTML = list.slice(0, state.shown.questions).map((x) => `
@@ -746,6 +772,11 @@ function bindSearch() {
 }
 
 const sumTotals = (obj) => Object.entries(obj || {}).filter(([k]) => !k.endsWith('_promulgues')).reduce((a, [, v]) => a + v, 0);
+/** Toutes les questions de la législature sont dans l'index (format 2 ; l'ancien format n'avait que les récentes). */
+const questionsCompletes = () => {
+    const sec = (state.meta && state.meta.sections && state.meta.sections.questions) || {};
+    return state.questions.length > 0 && state.questions.length >= sumTotals(sec.total);
+};
 /** Tous les dossiers de la législature sont publiés (défaut du pipeline ; un plafond MAX_DOSSIERS le désactive). */
 const dossiersComplets = () => {
     const sec = (state.meta && state.meta.sections && state.meta.sections.dossiers) || {};
@@ -775,7 +806,10 @@ function searchGroups() {
         },
         {
             key: 'questions', title: 'Questions', icon: 'fa-comments', items: state.questions, primary: (x) => `${x.titre} ${x.rubrique}`,
-            complete: false, scope: () => `parmi les ${fmtNum(state.questions.length)} questions les plus récentes, sur ${fmtNum(sumTotals(sec.questions && sec.questions.total))} posées`,
+            complete: questionsCompletes(), empty: 'Aucune question de la législature ne correspond.',
+            scope: () => (questionsCompletes()
+                ? `parmi les ${fmtNum(state.questions.length)} questions de la législature (liste complète)`
+                : `parmi les ${fmtNum(state.questions.length)} questions les plus récentes, sur ${fmtNum(sumTotals(sec.questions && sec.questions.total))} posées`),
             render: (x) => `<a href="#/question/${esc(x.uid)}" class="row-link !p-2.5">
                 <span class="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span class="badge ${QTYPE_BADGE[x.type] || ''}">${esc(x.type)}</span>${fmtShort(x.date)} · ${esc(x.auteur)} → ${esc(x.ministere || '—')}</span>
                 <span class="block font-semibold text-sm text-slate-900 dark:text-white mt-1 line-clamp-2">${esc(x.titre || x.rubrique || 'Question')}</span></a>`,
@@ -1443,9 +1477,10 @@ async function openDetail(kind, id) {
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     try {
-        const file = { depute: `deputes/${id}.json`, dossier: `dossiers/${id}.json`, question: `questions/${id}.json` }[kind];
+        const file = { depute: `deputes/${id}.json`, dossier: `dossiers/${id}.json` }[kind];
         // Couleurs des groupes et liens vers les députés : attendre les listes (2 s max).
-        const [data] = await Promise.all([getJSON(file), Promise.race([dataReady, new Promise((r) => setTimeout(r, 2000))])]);
+        const [data] = await Promise.all([kind === 'question' ? questionData(id) : getJSON(file),
+            Promise.race([dataReady, new Promise((r) => setTimeout(r, 2000))])]);
         if (token !== detailToken) return;
         state.detail = { kind, data };
         if (kind === 'dossier') markSeen(data);  // ouvrir un dossier suivi = nouveautés vues (après calcul du bandeau)
@@ -1455,6 +1490,24 @@ async function openDetail(kind, id) {
     } catch (e) {
         if (token !== detailToken) return;
         content.innerHTML = `<p class="text-sm text-rose-600">Impossible de charger cette fiche (${esc(e.message)}). Elle est peut-être sortie de la fenêtre des données publiées.</p>`;
+    }
+}
+
+/* Question : fiche détaillée si elle est publiée (questions récentes), sinon fiche légère tirée de l'index, avec lien
+ * vers la page officielle de l'AN pour le texte et la réponse. Lien direct (index pas encore chargé) : on tente la
+ * fiche, puis l'index. */
+async function questionData(id) {
+    const row = () => state.questions.find((x) => x.uid === id);
+    const leger = (r) => ({ ...r, leger: true, question: [], reponse: [], liens: { an: r.lienAN } });
+    let r = row();
+    if (r && !r.fiche) return leger(r);
+    try {
+        return await getJSON(`questions/${id}.json`);
+    } catch (e) {
+        if (!state.questions.length && !isDown('questions')) await loadQuestions();
+        r = row();
+        if (r) return leger(r);
+        throw e;
     }
 }
 
@@ -1658,10 +1711,15 @@ function renderQuestionDetail(x) {
     </div>
     ${block('Question', x.question, 'border-amber-400')}
     ${block(x.type === 'QG' ? 'Échange en séance (compte rendu)' : 'Réponse du Gouvernement', x.reponse, 'border-emerald-400')}
-    ${!x.question.length && !x.reponse.length ? '<p class="text-sm text-slate-500 mt-4">Le texte de cette question n\'est pas encore publié dans les données ouvertes.</p>' : ''}
+    ${x.leger
+        ? `<div class="mt-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-700/40 text-sm space-y-2"><p class="text-slate-600 dark:text-slate-300">Le texte de la question
+            ${x.repondue ? 'et celui de la réponse ne sont' : 'n\'est'} pas archivé${x.repondue ? 's' : ''} sur ce site pour les questions les plus anciennes.
+            Lisez-${x.repondue ? 'les' : 'le'} sur la page officielle de l'Assemblée nationale :</p>
+            ${x.liens.an ? `<a href="${esc(x.liens.an)}" target="_blank" rel="noopener" class="btn-secondary !text-xs"><i class="fa-solid fa-arrow-up-right-from-square"></i>Texte${x.repondue ? ' et réponse' : ''} sur le site de l'Assemblée</a>` : ''}</div>`
+        : !x.question.length && !x.reponse.length ? '<p class="text-sm text-slate-500 mt-4">Le texte de cette question n\'est pas encore publié dans les données ouvertes.</p>' : ''}
     <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 justify-end">
-        ${linkBtn(`${DATA}questions/${x.uid}.json`, 'JSON de la question', 'fa-code')}
-        ${x.liens && x.liens.an ? `<a href="${esc(x.liens.an)}" target="_blank" rel="noopener" class="btn-primary"><i class="fa-solid fa-landmark"></i>Page officielle</a>` : ''}
+        ${x.leger ? '' : linkBtn(`${DATA}questions/${x.uid}.json`, 'JSON de la question', 'fa-code')}
+        ${x.liens && x.liens.an && !x.leger ? `<a href="${esc(x.liens.an)}" target="_blank" rel="noopener" class="btn-primary"><i class="fa-solid fa-landmark"></i>Page officielle</a>` : ''}
     </div>`;
 }
 
@@ -1676,12 +1734,13 @@ function renderMeta() {
             ['deputes.json', 'Liste des députés'],
             ['groupes.json', 'Groupes politiques'],
             ['dossiers.json', 'Index des dossiers de loi'],
-            ['questions.json', 'Index des questions'],
+            ['questions.json', 'Index des questions (en colonnes)'],
             ['scrutins.json', 'Derniers scrutins'],
         ];
         if (first(state.deputes)) opts.push([`deputes/${first(state.deputes)}.json`, 'Fiche député (exemple)']);
         if (first(state.dossiers)) opts.push([`dossiers/${first(state.dossiers)}.json`, 'Dossier législatif (exemple)']);
-        if (first(state.questions)) opts.push([`questions/${first(state.questions)}.json`, 'Question (exemple)']);
+        const qFiche = state.questions.find((x) => x.fiche);
+        if (qFiche) opts.push([`questions/${qFiche.uid}.json`, 'Question (exemple)']);
         sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">/data/${esc(v)} — ${esc(l)}</option>`).join('');
         $('#apiRaw').href = DATA + sel.value;
     }
@@ -1693,7 +1752,7 @@ function renderMeta() {
         row('Législature', esc(m.legislature)),
         row('Députés', fmtNum(s.deputes && s.deputes.total)),
         row('Dossiers affichés', `${fmtNum(s.dossiers && s.dossiers.affiches)} · ${fmtNum(s.dossiers && s.dossiers.textesRecuperes)} textes intégraux récupérés au dernier passage`),
-        row('Questions affichées', fmtNum(s.questions && s.questions.affiches)),
+        row('Questions', `${fmtNum(s.questions && s.questions.affiches)} dans l'index${s.questions && s.questions.fiches ? ` · ${fmtNum(s.questions.fiches)} fiches détaillées` : ''}`),
         row('Scrutins', `${fmtNum(s.scrutins && s.scrutins.affiches)} affichés / ${fmtNum(s.scrutins && s.scrutins.total)}`),
         `<div class="stat md:col-span-2"><span class="stat-label">Sources officielles</span>${Object.entries(m.sources || {}).map(([k, u]) =>
             `<a class="block truncate text-blue-600 dark:text-blue-400 hover:underline font-mono" href="${esc(u)}">${esc(k)} — ${esc(u.split('/').pop())}</a>`).join('')}
