@@ -28,5 +28,20 @@ class VendorTest(unittest.TestCase):
         self.assertIn("CC BY 4.0", fa)  # attribution des icônes : en-tête conservé
 
 
+class MentionsTest(unittest.TestCase):
+    def test_page_et_lien(self):
+        self.assertIn('id="tab-mentions"', INDEX)
+        self.assertIn('href="#/mentions"', INDEX)  # lien dans le pied de page
+        for titre in ("Éditeur", "Hébergeur", "Vie privée des visiteurs", "Données personnelles des députés", "Vos droits"):
+            self.assertIn(f"<h3>{titre}</h3>", INDEX)
+        self.assertIn("'mentions'", (ROOT / "assets" / "app.js").read_text(encoding="utf-8"))  # route déclarée
+
+    def test_modele_issue_donnees_personnelles(self):
+        tpl = ROOT / ".github" / "ISSUE_TEMPLATE" / "donnees-personnelles.md"
+        self.assertTrue(tpl.is_file())
+        self.assertIn("publique", tpl.read_text(encoding="utf-8"))  # avertissement : les issues sont publiques
+        self.assertIn("template=donnees-personnelles.md", INDEX)
+
+
 if __name__ == "__main__":
     unittest.main()
