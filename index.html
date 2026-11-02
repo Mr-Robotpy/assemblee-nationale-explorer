@@ -153,6 +153,7 @@
                 <input id="findDeputyInput" type="search" autocomplete="off" placeholder="Votre commune ou code postal (ex. Bourg-en-Bresse, 33000)" class="input">
                 <button class="btn-primary whitespace-nowrap">Chercher</button>
             </form>
+            <div data-global-addr></div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
                 <label class="filter-label">Groupe<select id="filterGroup" class="input text-xs"><option value="">Tous les groupes</option></select></label>
                 <label class="filter-label">Commission permanente<select id="filterCommission" class="input text-xs"><option value="">Toutes</option></select></label>
@@ -278,6 +279,7 @@
                 Les députés en exercice sont <strong>tous</strong> couverts, les communes presque toutes (limites détaillées dans les résultats) ; pour les lois, questions et scrutins, la recherche porte sur la
                 <strong>sélection publiée</strong> sur ce site, pas sur les archives complètes de l'Assemblée.
             </p>
+            <div data-global-addr></div>
             <p id="searchSummary" class="text-sm font-medium text-slate-700 dark:text-slate-200"></p>
         </div>
         <div id="searchResults" class="grid grid-cols-1 lg:grid-cols-2 gap-6"></div>
@@ -323,8 +325,9 @@
                 techniques du navigateur de chaque visiteur, qu'il traite pour assurer le service et sa sécurité, en tant que responsable de
                 ce traitement (<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">déclaration de confidentialité de GitHub</a>).
                 GitHub étant établi aux États-Unis, ces données peuvent y être transférées.</li>
-                <li><strong>Recherche par adresse (facultative)</strong> : dans une commune partagée entre plusieurs circonscriptions, le bouton
-                « Préciser avec mon adresse » permet de localiser une adresse. Uniquement lorsque vous cliquez sur « Chercher », l'adresse saisie
+                <li><strong>Recherche par adresse (facultative)</strong> : le champ « Trouver mon député par adresse » et, dans une commune
+                partagée entre plusieurs circonscriptions, le bouton « Préciser avec mon adresse » permettent de localiser une adresse. Uniquement
+                lorsque vous cliquez sur « Chercher par adresse » ou « Chercher », l'adresse saisie
                 est envoyée à l'<strong>API Adresse de l'État</strong> (<a href="https://adresse.data.gouv.fr" target="_blank" rel="noopener">adresse.data.gouv.fr</a>,
                 Base Adresse Nationale), qui renvoie ses coordonnées ; la circonscription est ensuite calculée dans votre navigateur. Ce site ne
                 conserve pas l'adresse, ne la place pas dans l'URL et ne la transmet à personne d'autre. Le traitement par l'API Adresse relève

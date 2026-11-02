@@ -397,11 +397,13 @@ class CircosTest(unittest.TestCase):
             (out / "communes.json").write_text(json.dumps({"c": [
                 ["Lyon 7e Arrondissement", "69387", "69007", "69", [2, 4], 0, "69123"],
                 ["Saint-Denis", "97411", "97400", "974", [1, 6], 0],
-                ["Bourg", "01053", "01000", "01", [1], 0]]}), encoding="utf-8")
+                ["Bourg", "01053", "01000", "01", [1], 0]],
+                "nonRattachees": [["Commune nouvelle", "01999", "", "01"]]}), encoding="utf-8")
             (src / bd.CIRCOS_FILE).write_text(json.dumps(self.GEO), encoding="utf-8")
             meta = {"sections": {}}
             res = bd.update_circos(out, Path(t), src, meta, "2026-11-02T04:30:00Z")
-            self.assertEqual(sorted(f.name for f in (out / "circos").iterdir()), ["69.json", "974.json"])  # pas l'Ain
+            # l'Ain : aucune commune partagée, mais une commune non rattachée → ses contours sont publiés
+            self.assertEqual(sorted(f.name for f in (out / "circos").iterdir()), ["01.json", "69.json", "974.json"])
             self.assertEqual(res["circonscriptionsAbsentes"], ["974-6"])
             meta["sections"]["circos"] = res
             self.assertIsNone(bd.update_circos(out, Path(t), src, meta, "2026-11-10T04:30:00Z"))  # récent : conservé

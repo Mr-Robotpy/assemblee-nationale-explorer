@@ -48,11 +48,18 @@ Limites, affichées dans le bloc « Votre député par commune » (« Limites de
   rattachées (une vingtaine) : elles ne sont pas devinées, mais listées dans `communes.json` (`nonRattachees`) et
   signalées comme telles si on les cherche. Le taux de couverture affiché est arrondi par défaut.
 
+**Trouver son député par adresse**, quelle que soit la commune (champ distinct sur les pages Députés et Recherche) :
+l'adresse est géocodée par l'API Adresse ; si la commune n'a qu'une circonscription, la table des communes répond
+directement ; sinon (commune partagée ou non rattachée), la circonscription est calculée dans les contours du
+département. Non couverts : Français de l'étranger (hors de la Base Adresse Nationale) — recherche par ville
+(« Londres ») ; collectivités du Pacifique, à vérifier.
+
 **Préciser avec son adresse** (communes et arrondissements partagés) : l'adresse est géocodée par l'API Adresse de
 l'État (`api-adresse.data.gouv.fr`) — seul envoi à un tiers, déclenché par l'utilisateur à chaque recherche et annoncé à
 côté du bouton — puis la circonscription est calculée dans le navigateur (point dans polygone, `assets/geo.js`) à partir
 de `data/circos/<dept>.json`. Ces fichiers sont tirés des « Contours géographiques des circonscriptions législatives »
-(data.gouv, juin 2024, contours généralisés) pour les seuls départements comptant une commune partagée. À moins de
+(data.gouv, juin 2024, contours généralisés) pour les seuls départements comptant une commune partagée ou une
+commune non rattachée. À moins de
 100 m d'une limite, le résultat est signalé comme incertain ; la carte électorale fait foi. « Me localiser » utilise la
 position de l'appareil, sans envoi.
 
