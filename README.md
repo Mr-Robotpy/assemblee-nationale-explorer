@@ -140,13 +140,16 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
 Polices (Inter), icônes (Font Awesome Free) et Chart.js sont **hébergés sur le site** (`assets/vendor/`), sans appel à
 Google Fonts ni à un CDN : l'adresse IP des visiteurs n'est transmise à aucun tiers pour afficher la page. Ils sont
 copiés depuis les paquets npm figés dans `package.json` par `npm run vendor` (licences jointes, voir
-`assets/vendor/README.md`). Seules les photos des députés sont chargées depuis le site de l'Assemblée nationale.
+`assets/vendor/README.md`). Les députés sont représentés par leurs **initiales** sur la couleur de leur groupe, sans
+photo : les portraits de l'Assemblée ne sont pas réutilisables sans accord préalable (mentions légales de l'AN, novembre
+2026) et les charger depuis son site transmettrait l'adresse IP des visiteurs. Le seul envoi à un tiers reste la recherche
+par adresse, à la demande de l'utilisateur.
 
 ## Mentions légales et données personnelles
 
 Page `#/mentions` (lien dans le pied de page) : éditeur (particulier non professionnel, LCEN art. 6-III-2), hébergeur,
 sources, vie privée des visiteurs (aucun cookie ni mesure d'audience ; `localStorage` local ; journaux de GitHub ;
-photos chargées depuis l'Assemblée), données personnelles des députés (source, finalité, base légale, durée) et
+aucune image tierce), données personnelles des députés (source, finalité, base légale, durée) et
 exercice des droits par courriel (jeremygforia@gmail.com, contact non public, réponse sous un mois) ou par les issues (modèle
 `.github/ISSUE_TEMPLATE/donnees-personnelles.md`, qui rappelle que les issues sont publiques et renvoie au courriel). À mettre à jour si le site ajoute un traitement (statistiques, formulaire…).
 

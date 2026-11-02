@@ -13,6 +13,12 @@ class VendorTest(unittest.TestCase):
         externes = re.findall(r'<(?:script|link)[^>]+(?:src|href)="(https?://[^"]+)"', INDEX)
         self.assertEqual(externes, [])
 
+    def test_aucune_image_distante(self):
+        """Aucune image chargée depuis un autre site (photos des députés comprises) : pas d'adresse IP transmise."""
+        app = (ROOT / "assets" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("<img", app)
+        self.assertEqual(re.findall(r'<img[^>]+src="https?://', INDEX), [])
+
     def test_fichiers_references_presents(self):
         """Chaque fichier assets/vendor référencé existe (sinon : relancer `npm run vendor`)."""
         refs = re.findall(r'(?:src|href)="(assets/vendor/[^"?]+)"', INDEX)
