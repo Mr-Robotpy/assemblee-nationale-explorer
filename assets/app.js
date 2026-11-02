@@ -86,12 +86,13 @@ async function getJSON(path) {
 function initials(d) {
     return esc(((d.prenom || '')[0] || '') + ((d.nom || '')[0] || ''));
 }
+/* Initiales sur la couleur du groupe, sans photo : les portraits de l'Assemblée ne sont pas réutilisables sans accord
+ * (mentions légales de l'AN) et les afficher depuis son site lui transmettrait l'adresse IP des visiteurs. */
 function avatar(d, size = 'w-12 h-12', ring = '') {
     const color = groupColor(d.groupeUid);
-    return `<span class="relative inline-flex ${size} shrink-0">
-        <span class="absolute inset-0 rounded-full flex items-center justify-center font-bold text-sm" style="background:${esc(color)};color:${inkOn(color)}">${initials(d)}</span>
-        <img src="${esc(d.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="relative ${size} rounded-full object-cover border border-slate-200 dark:border-slate-600 ${ring}" onerror="this.remove()">
-    </span>`;
+    const text = /\bw-(1[6-9]|[2-9]\d)\b/.test(size) ? 'text-2xl' : 'text-sm';
+    return `<span aria-hidden="true" class="inline-flex ${size} shrink-0 rounded-full items-center justify-center font-bold ${text} border-slate-200 dark:border-slate-600 ${ring}"
+        style="background:${esc(color)};color:${inkOn(color)}">${initials(d)}</span>`;
 }
 function groupColor(uid) {
     return (state.groupes.find((g) => g.uid === uid) || {}).couleur || '#94a3b8';

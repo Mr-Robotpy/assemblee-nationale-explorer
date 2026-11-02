@@ -335,8 +335,6 @@ class Referentiel:
         return txt(o.get("libelle"))
 
 
-def photo_url(uid: str) -> str:
-    return f"{AN_SITE}/dyn/static/tribun/{LEGISLATURE}/photos/carre/{uid.removeprefix('PA')}.jpg"
 
 
 def _contacts(acteur: dict) -> dict:
@@ -427,7 +425,6 @@ def build_deputes(ref: Referentiel) -> tuple[list[dict], dict[str, dict], list[d
             "region": txt(lieu.get("region")),
             "commission": ref.organe_label(com_ref, short=False),
             "commissionAbrev": ref.organe_label(com_ref, short=True),
-            "photo": photo_url(uid),
         }
         detail = {
             **summary,

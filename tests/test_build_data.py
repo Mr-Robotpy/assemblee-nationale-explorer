@@ -52,7 +52,7 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(auzanot["sexe"], "F")
         self.assertEqual(auzanot["departement"], "Vaucluse")
         self.assertEqual(auzanot["groupe"], "RN")
-        self.assertTrue(auzanot["photo"].endswith("/796118.jpg"))
+        self.assertNotIn("photo", auzanot)  # portraits non réutilisables sans accord de l'AN : initiales seulement
         fiche = self.load("deputes/PA796118.json")
         self.assertEqual(fiche["liens"]["an"], "https://www.assemblee-nationale.fr/dyn/deputes/PA796118")
         self.assertIn("benedicte.auzanot@assemblee-nationale.fr", fiche["contacts"]["emails"])
