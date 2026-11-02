@@ -72,6 +72,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Tests du front (géométrie, node --test)
+        run: node --test tests/*.test.mjs
+
       - name: Compilation CSS (Tailwind)
         run: |
           npm ci --no-audit --no-fund
@@ -86,9 +89,11 @@ jobs:
           touch _site/.nojekyll
           # Version propre au déploiement : le navigateur ne peut pas associer le nouvel index.html
           # à un ancien app.js resté en cache (GitHub Pages autorise 10 min de cache).
+          # Concerne nos fichiers assets/*.css|js (pas assets/vendor/, déjà versionné par dossier).
           v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
-          sed -i -E "s#(assets/app\.(css|js))\"#\1?v=${v}\"#g" _site/index.html
-          test "$(grep -c "?v=${v}" _site/index.html)" -eq 2 || { echo "Versionnage des assets introuvable dans index.html"; exit 1; }
+          n=$(grep -cE '"assets/[a-z]+\.(css|js)"' _site/index.html)
+          sed -i -E "s#\"(assets/[a-z]+\.(css|js))\"#\"\1?v=${v}\"#g" _site/index.html
+          test "$n" -ge 3 && test "$(grep -c "?v=${v}" _site/index.html)" -eq "$n" || { echo "Versionnage des assets incomplet dans index.html"; exit 1; }
 
       - uses: actions/upload-pages-artifact@v3
         with:

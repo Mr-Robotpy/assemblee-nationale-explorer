@@ -363,6 +363,62 @@ class CommunesTest(unittest.TestCase):
         self.assertEqual(stats["arrondissements"], 4)
 
 
+def _carre(x0, y0, cote=0.01):
+    return [[[x0, y0], [x0 + cote, y0], [x0 + cote, y0 + cote], [x0, y0 + cote], [x0, y0]]]
+
+
+class CircosTest(unittest.TestCase):
+    """Contours des circonscriptions : format du fichier data.gouv (codeDepartement, codeCirconscription)."""
+
+    GEO = {"type": "FeatureCollection", "features": [
+        {"properties": {"codeDepartement": "69", "codeCirconscription": "6902"},
+         "geometry": {"type": "Polygon", "coordinates": _carre(4.8312345678, 45.73)}},
+        {"properties": {"codeDepartement": "69", "codeCirconscription": "6904"},
+         "geometry": {"type": "MultiPolygon", "coordinates": [_carre(4.85, 45.73), _carre(4.9, 45.8)]}},
+        {"properties": {"codeDepartement": "ZD", "codeCirconscription": "ZD01"},          # La Réunion
+         "geometry": {"type": "Polygon", "coordinates": _carre(55.4, -20.9)}},
+        {"properties": {"codeDepartement": "01", "codeCirconscription": "0101"},          # non demandé
+         "geometry": {"type": "Polygon", "coordinates": _carre(5.2, 46.2)}},
+        {"properties": {"codeDepartement": "69", "codeCirconscription": "6905"},
+         "geometry": {"type": "Point", "coordinates": [4.8, 45.7]}},                      # géométrie ignorée
+    ]}
+
+    def test_decoupage_par_departement(self):
+        res = bd.build_circos(self.GEO, {"69", "974"})
+        self.assertEqual(sorted(res), ["69", "974"])
+        self.assertEqual([f["properties"]["circo"] for f in res["69"]["features"]], [2, 4])
+        self.assertEqual(res["69"]["features"][0]["geometry"]["coordinates"][0][0], [4.83123, 45.73])  # arrondi
+        self.assertEqual(res["974"]["features"][0]["properties"]["circo"], 1)
+
+    def test_publication_et_cache(self):
+        with tempfile.TemporaryDirectory() as t:
+            out, src = Path(t) / "data", Path(t) / "src"
+            out.mkdir(); src.mkdir()
+            (out / "communes.json").write_text(json.dumps({"c": [
+                ["Lyon 7e Arrondissement", "69387", "69007", "69", [2, 4], 0, "69123"],
+                ["Saint-Denis", "97411", "97400", "974", [1, 6], 0],
+                ["Bourg", "01053", "01000", "01", [1], 0]]}), encoding="utf-8")
+            (src / bd.CIRCOS_FILE).write_text(json.dumps(self.GEO), encoding="utf-8")
+            meta = {"sections": {}}
+            res = bd.update_circos(out, Path(t), src, meta, "2026-11-02T04:30:00Z")
+            self.assertEqual(sorted(f.name for f in (out / "circos").iterdir()), ["69.json", "974.json"])  # pas l'Ain
+            self.assertEqual(res["circonscriptionsAbsentes"], ["974-6"])
+            meta["sections"]["circos"] = res
+            self.assertIsNone(bd.update_circos(out, Path(t), src, meta, "2026-11-10T04:30:00Z"))  # récent : conservé
+            meta["sections"]["circos"]["version"] = bd.CIRCOS_VERSION - 1
+            self.assertIsNotNone(bd.update_circos(out, Path(t), src, meta, "2026-11-10T04:30:00Z"))  # format changé
+
+    def test_contours_incomplets(self):
+        with tempfile.TemporaryDirectory() as t:
+            out, src = Path(t) / "data", Path(t) / "src"
+            out.mkdir(); src.mkdir()
+            (out / "communes.json").write_text(json.dumps({"c": [[f"C{i}", f"{i:02d}001", "", f"{i:02d}", [1, 2], 0]
+                                                                   for i in range(10, 30)]}), encoding="utf-8")
+            (src / bd.CIRCOS_FILE).write_text(json.dumps(self.GEO), encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                bd.update_circos(out, Path(t), src, {"sections": {}}, "2026-11-02T04:30:00Z")
+
+
 class SanitizerTest(unittest.TestCase):
     def test_strips_attributes_and_dangerous_tags(self):
         out = bd.sanitize_html('<p style="x" onclick="evil()">Bonjour <a href="javascript:x">lien</a></p><style>p{}</style><iframe src=x></iframe>')
