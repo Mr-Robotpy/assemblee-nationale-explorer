@@ -266,6 +266,9 @@ class CommunesTest(unittest.TestCase):
             {"nom": "Ajaccio", "code": "2A004", "codeDepartement": "2A", "codesPostaux": ["20000", "20090"], "population": 73000},
             {"nom": "Miquelon-Langlade", "code": "97501", "codeDepartement": "975", "codesPostaux": ["97500"], "population": 580},
             {"nom": "Commune nouvelle", "code": "01999", "codeDepartement": "01", "codesPostaux": [], "population": 10},
+            {"nom": "Village détruit", "code": "01998", "codeDepartement": "01", "codesPostaux": [], "population": 0},
+            {"nom": "Population inconnue", "code": "01997", "codeDepartement": "01", "codesPostaux": []},
+            {"nom": "Archipel inhabité", "code": "98412", "codeDepartement": "984", "codesPostaux": []},
         ]
         self.keys = {("01", "1"), ("01", "2"), ("2A", "1"), ("099", "3"), ("975", "1")}
 
@@ -286,10 +289,14 @@ class CommunesTest(unittest.TestCase):
         self.assertEqual(c["ZZ229"][3:5], ["099", [3]])           # Français de l'étranger
         self.assertEqual(c["97501"][3:5], ["975", [1]])           # absente du scrutin, département à circonscription unique
         self.assertNotIn("01999", c)                              # inconnue et département à plusieurs circonscriptions
-        self.assertEqual(doc["nonRattachees"], [["Commune nouvelle", "01999", "", "01"]])  # mais listée, pas oubliée
-        self.assertEqual(doc["couverture"], {"communes": 5, "rattachees": 4, "nonRattachees": 1})
+        # Listées, pas oubliées ; population absente : pas de conclusion, la commune reste « non rattachée ».
+        self.assertEqual(doc["nonRattachees"], [["Commune nouvelle", "01999", "", "01"], ["Population inconnue", "01997", "", "01"]])
+        # Population 0, ou territoire sans aucune circonscription : sans électeurs, hors couverture.
+        self.assertEqual(doc["sansElecteurs"], [["Village détruit", "01998", "", "01"], ["Archipel inhabité", "98412", "", "984"]])
+        self.assertEqual(doc["couverture"], {"communes": 6, "rattachees": 4, "nonRattachees": 2, "sansElecteurs": 2})
+        self.assertEqual(stats["communesSansElecteurs"], 2)
         self.assertEqual(stats["partagees"], 1)
-        self.assertEqual(stats["communesSansCorrespondance"], 1)
+        self.assertEqual(stats["communesSansCorrespondance"], 2)
         self.assertEqual(stats["circonscriptionsSansDepute"], 0)
 
     def test_latin1(self):

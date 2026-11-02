@@ -963,6 +963,12 @@ async function resolveAddress(q, out) {
     const rows = communeRows() || [];
     const row = rows.find((r) => r[1] === citycode);
     const orphan = !row && ((state.communes && state.communes.nonRattachees) || []).find((r) => r[1] === citycode);
+    const sansElec = !row && ((state.communes && state.communes.sansElecteurs) || []).find((r) => r[1] === citycode);
+    if (sansElec) {
+        out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">« ${esc(label || q)} » : ${esc(sansElec[0])} est un territoire sans électeurs
+            (village détruit en 1916 ou territoire inhabité), sans bureau de vote ni député à afficher.</p>`;
+        return;
+    }
     const dept = row ? row[3] : orphan ? orphan[3] : deptFromInsee(String(citycode || ''));
     let circ = null, dist = null, source = '';
     if (row && row[4].length === 1) {
@@ -1057,6 +1063,12 @@ function communeLimits(cov) {
             législatives de juin 2024 (source du rattachement), dans un département à plusieurs circonscriptions. Elles ne sont pas devinées.
             ${list.length ? `<span class="block mt-1 text-slate-500">${list.map((r) => `${esc(r[0])} (${esc(r[3])})`).join(' · ')}</span>` : ''}</li>`);
     }
+    const sansElec = (state.communes && state.communes.sansElecteurs) || [];
+    if (sansElec.length) {
+        items.push(`<li><strong>${fmtNum(sansElec.length)} territoire(s) sans électeurs</strong>, hors du calcul de couverture : villages détruits
+            en 1916 (Meuse), Terres australes et antarctiques, Clipperton. Sans électeurs, ils n'ont pas de bureau de vote.
+            <span class="block mt-1 text-slate-500">${sansElec.map((r) => `${esc(r[0])} (${esc(r[3])})`).join(' · ')}</span></li>`);
+    }
     items.push('<li><strong>Communes et arrondissements partagés</strong> entre plusieurs circonscriptions : tous les députés concernés sont affichés ; la bonne circonscription figure sur la carte électorale.</li>');
     if (vacants) items.push(`<li><strong>${fmtNum(vacants)} circonscription(s) sans député en exercice</strong> (siège vacant) : signalées dans les résultats.</li>`);
     items.push('<li>Rattachement calculé à partir des résultats officiels des législatives 2024 par bureau de vote (ministère de l\'Intérieur) ; noms et codes postaux : API Découpage administratif.</li>');
@@ -1102,14 +1114,21 @@ function renderCommunes(q, toks) {
     }
     const parentsAffiches = new Set(hits.filter((r) => rows.some((x) => x[6] === r[1])).map((r) => r[1]));
     // Communes actuelles connues mais sans circonscription (créées ou modifiées après juin 2024) : le dire.
-    const orphans = (state.communes.nonRattachees || []).filter((r) => (isCode
+    const matchOrphan = (r) => (isCode
         ? r[1] === code || r[2].split(' ').includes(code)
-        : toks.join('').length >= 3 && matches(norm(`${r[0]} ${r[3]}`), toks)));
+        : toks.join('').length >= 3 && matches(norm(`${r[0]} ${r[3]}`), toks));
+    const sansElecSet = new Set();
+    const orphans = [
+        ...(state.communes.nonRattachees || []).filter(matchOrphan),
+        ...(state.communes.sansElecteurs || []).filter(matchOrphan).map((r) => (sansElecSet.add(r), r)),
+    ];
     const orphanHtml = orphans.slice(0, COMMUNE_PREVIEW).map((r) => `<div class="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-1 text-sm">
         <p><span class="font-bold text-slate-900 dark:text-white">${esc(r[0])}</span> <span class="text-slate-500">· département ${esc(r[3])}${r[2] ? ` · ${esc(r[2])}` : ''}</span></p>
-        <p class="text-xs text-amber-800 dark:text-amber-200">Circonscription inconnue de ce site : la commune a été créée ou modifiée après les législatives de juin 2024,
-        dans un département qui compte plusieurs circonscriptions. Votre circonscription figure sur votre carte électorale.
-        <a class="text-blue-600 dark:text-blue-400 hover:underline" href="#/deputes?q=${encodeURIComponent(r[3])}">Voir les députés du département →</a></p></div>`).join('');
+        <p class="text-xs text-amber-800 dark:text-amber-200">${sansElecSet.has(r)
+            ? 'Territoire sans électeurs (village détruit en 1916 ou territoire inhabité) : aucun bureau de vote, donc pas de député à afficher.'
+            : `Circonscription inconnue de ce site : la commune a été créée ou modifiée après les législatives de juin 2024,
+        dans un département qui compte plusieurs circonscriptions. Utilisez « Trouver mon député par adresse », ou votre carte électorale.
+        <a class="text-blue-600 dark:text-blue-400 hover:underline" href="#/deputes?q=${encodeURIComponent(r[3])}">Voir les députés du département →</a>`}</p></div>`).join('');
     if (!hits.length) {
         if (orphanHtml) return { html: wrap(orphanHtml), count: orphans.length };
         return isCode ? { html: wrap(`<p class="text-sm text-slate-500">Aucune commune pour le code « ${esc(code)} ».</p>`), count: 0 } : { html: '', count: 0 };
