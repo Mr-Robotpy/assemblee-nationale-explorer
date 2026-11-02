@@ -1,5 +1,5 @@
-/* Géométrie pour la recherche par adresse : point dans un polygone (GeoJSON, lon/lat) et distance à la limite
- * de circonscription la plus proche. Script classique (pas de module) : expose window.ANGeo ; testé par
+/* Recherche par adresse : point dans un polygone (GeoJSON, lon/lat), distance à la limite de circonscription la
+ * plus proche, et contrôle de la réponse du géocodeur (assessGeocode). Script classique (pas de module) : expose window.ANGeo ; testé par
  * tests/geo.test.mjs (node --test). Aucune dépendance. */
 (function (root) {
     'use strict';
@@ -63,5 +63,27 @@
         return null;
     }
 
-    root.ANGeo = { inRing, inPolygon, inGeometry, distanceToBoundaryM, findCirco };
+    const SCORE_MIN = 0.5;  // en deçà, le géocodeur a deviné (« Mata-Utu » → « Matas, Gaillac-Toulza » : 0,37)
+    const fold = (s) => ' ' + String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+
+    /**
+     * Peut-on se fier à la réponse du géocodeur pour la requête `query` ? `props` = properties de la feature.
+     * `precise` : la commune compte plusieurs circonscriptions (ou n'est pas rattachée), le centre de la commune
+     * ne suffit donc pas. Renvoie { verdict, autreCommune } :
+     *  - verdict 'incertain' (score trop faible), 'commune' (seul le centre de la commune est connu alors qu'il faut
+     *    une adresse) ou 'ok' ;
+     *  - autreCommune : ni la commune, ni le code postal, ni la localité trouvés ne figurent dans la requête
+     *    (« 12 rue de la paix » → Cherbourg) : à signaler, sans bloquer.
+     */
+    function assessGeocode(props, query, precise) {
+        const p = props || {};
+        const verdict = !(p.score >= SCORE_MIN) ? 'incertain' : precise && p.type === 'municipality' ? 'commune' : 'ok';
+        const q = fold(query);
+        const autreCommune = ![p.city, p.postcode, p.locality, p.oldcity, p.municipality]
+            .some((v) => v && q.includes(fold(v)));
+        return { verdict, autreCommune };
+    }
+
+    root.ANGeo = { inRing, inPolygon, inGeometry, distanceToBoundaryM, findCirco, assessGeocode };
 })(typeof window !== 'undefined' ? window : globalThis);

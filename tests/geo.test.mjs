@@ -47,3 +47,33 @@ test('distance à la limite, en mètres', () => {
     const centre = findCirco(features, 4.835, 45.735);
     assert.ok(centre.distanceM > 380 && centre.distanceM < 400, `centre : ${centre.distanceM}`); // ~ demi-côté nord-sud (≈ 553 m) ou est-ouest (≈ 389 m)
 });
+
+// Réponses réelles du géocodeur (data.geopf.fr/geocodage, novembre 2026).
+const { assessGeocode } = ctx.ANGeo;
+
+test('géocodage : score faible refusé (Wallis-et-Futuna absent de la BAN)', () => {
+    const r = assessGeocode({ label: 'Matas 31550 Gaillac-Toulza', type: 'street', score: 0.37, city: 'Gaillac-Toulza', postcode: '31550' }, 'Mata-Utu');
+    assert.equal(r.verdict, 'incertain');
+});
+
+test('géocodage : centre de commune insuffisant si la commune est partagée', () => {
+    const p = { type: 'municipality', score: 0.94, city: 'Aurseulles', postcode: '14240' };
+    assert.equal(assessGeocode(p, 'Aurseulles 14240', true).verdict, 'commune');
+    assert.equal(assessGeocode(p, 'Aurseulles 14240', false).verdict, 'ok');
+});
+
+test('géocodage : adresse précise acceptée, commune reconnue malgré accents et tirets', () => {
+    const r = assessGeocode({ type: 'housenumber', score: 0.97, city: 'Orée d’Anjou', postcode: '49270' }, "3 rue du Moulin, oree d'anjou", true);
+    assert.deepEqual({ ...r }, { verdict: 'ok', autreCommune: false });
+});
+
+test('géocodage : ancienne commune (localité) ou code postal suffisent', () => {
+    const p = { type: 'locality', score: 0.95, city: 'Porte des Pierres Dorées', locality: 'Pouilly-le-Monial', postcode: '69400' };
+    assert.equal(assessGeocode(p, 'Pouilly-le-Monial', true).autreCommune, false);
+    assert.equal(assessGeocode(p, 'route de Theizé 69400', true).autreCommune, false);
+});
+
+test('géocodage : commune absente de la requête signalée', () => {
+    const r = assessGeocode({ type: 'housenumber', score: 0.98, city: 'Cherbourg-en-Cotentin', postcode: '50100' }, '12 rue de la paix');
+    assert.deepEqual({ ...r }, { verdict: 'ok', autreCommune: true });
+});
