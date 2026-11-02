@@ -289,7 +289,7 @@
     <section id="tab-mentions" class="tab-content hidden">
         <article class="card space-y-1 max-w-3xl mx-auto mentions text-sm leading-relaxed text-slate-700 dark:text-slate-200">
             <h2 class="text-xl font-bold text-slate-900 dark:text-white">Mentions légales et confidentialité</h2>
-            <p class="text-xs text-slate-500">Dernière mise à jour : 2 novembre 2026 (photos des députés retirées).</p>
+            <p class="text-xs text-slate-500">Dernière mise à jour : 2 novembre 2026 (confirmation de l'adresse).</p>
 
             <h3>Éditeur</h3>
             <p>Ce site est édité par un particulier, à titre non professionnel et sans but lucratif. Conformément à l'article 6-III-2
@@ -331,7 +331,8 @@
                 lorsque vous cliquez sur « Chercher par adresse » ou « Chercher », l'adresse saisie
                 est envoyée à l'<strong>API Adresse de l'État</strong> (Base Adresse Nationale), servie par la Géoplateforme de l'IGN
                 (<a href="https://cartes.gouv.fr/aide/fr/guides-utilisateur/utiliser-les-services-de-la-geoplateforme/geocodage/" target="_blank" rel="noopener">data.geopf.fr</a>),
-                qui renvoie ses coordonnées ; la circonscription est ensuite calculée dans votre navigateur. Ce site ne
+                qui renvoie ses coordonnées (si la voie n'est pas trouvée dans la commune indiquée, une seconde requête au même service
+                la cherche dans toute la ville) ; la circonscription est ensuite calculée dans votre navigateur. Ce site ne
                 conserve pas l'adresse, ne la place pas dans l'URL et ne la transmet à personne d'autre. Le traitement par l'API Adresse relève
                 de ses propres conditions. Base légale : votre demande explicite, à chaque recherche.</li>
                 <li><strong>« Me localiser » (facultatif)</strong> : votre navigateur vous demande l'autorisation ; la position est utilisée

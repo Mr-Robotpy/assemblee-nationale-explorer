@@ -69,6 +69,10 @@ figure pas dans la saisie (« 12 rue de la paix » → Cherbourg), le résultat 
 dans Lyon 7e, « 8 rue Victor Hugo » (2e arrondissement) devient « 8 Rue Victor Lagrange ». Si la voie trouvée, le code
 postal ou le numéro diffèrent de la saisie (abréviations et accents ignorés), le site propose les candidats du géocodeur
 et n'affiche aucun député sans un clic de confirmation ; quand tout concorde, le résultat s'affiche directement.
+Dans le champ global, une saisie sans commune (« 12 rue de la paix ») demande aussi confirmation parmi les communes
+possibles. Si la voie saisie n'existe pas là où elle est cherchée (« 12 rue de la République » dans Lyon 7e), elle est
+cherchée dans toute la ville (second appel au même service, pour le même clic) et le site indique où elle se trouve
+(« Lyon 2e Arrondissement »), au lieu de citer une autre voie de l'arrondissement.
 
 **Préciser avec son adresse** (communes et arrondissements partagés) : l'adresse est géocodée par l'API Adresse de
 l'État, servie par la Géoplateforme de l'IGN (`data.geopf.fr/geocodage` ; l'ancien hôte `api-adresse.data.gouv.fr` est
