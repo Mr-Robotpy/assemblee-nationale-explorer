@@ -857,8 +857,10 @@ const LIMITE_PROCHE_M = 100;  // en deçà, le résultat est signalé comme ince
 
 function addressBlock(r) {
     const [nom, insee, cps, dept, circs] = r;
+    // Ville entière (Lyon pour « Lyon 7e Arrondissement ») : pour retrouver une voie saisie dans le mauvais arrondissement.
+    const ville = (r[6] && ((communeRows() || []).find((x) => x[1] === r[6]) || [])[0]) || nom;
     return `<div data-addr data-insee="${esc(insee)}" data-dept="${esc(dept)}" data-circs="${esc(circs.join(','))}"
-            data-cp="${esc((cps || '').split(' ')[0] || '')}" data-nom="${esc(nom)}">
+            data-cp="${esc((cps || '').split(' ')[0] || '')}" data-nom="${esc(nom)}" data-ville="${esc(ville)}">
         <button type="button" data-addr-open class="btn-secondary !text-xs"><i class="fa-solid fa-location-crosshairs"></i>Préciser avec mon adresse</button>
     </div>`;
 }
@@ -897,26 +899,61 @@ async function geocode(q, box) {
     return f;
 }
 
+/* Voie introuvable là où elle a été cherchée (« 12 rue de la République » dans Lyon 7e : elle est dans le 2e) :
+ * on la cherche dans toute la ville `ville` (même service, même clic de l'utilisateur) et, si elle y est, on dit où,
+ * au lieu de citer une autre voie (« 12 Rue du Repos »), ce qui laissait croire à une adresse réécrite.
+ * `ici` : nom du lieu cherché ; `exclu` : son code INSEE. Renvoie true si l'adresse a été trouvée (et proposée). */
+async function voieAilleurs(q, ville, ici, exclu, out) {
+    const saisie = q.replace(/\b\d{5}\b/g, ' ').replace(/\b\d{1,2}\s*(?:e|er|eme|ème)?\s+arr(?:ondissement|\.)?\b/gi, ' ');
+    const qv = `${saisie} ${ville}`;
+    let trouve = null;
+    try {
+        trouve = (await apiAdresse({ q: qv })).find((f) => f.properties.citycode !== exclu
+            && window.ANGeo.assessGeocode(f.properties, qv, false).verdict === 'ok'
+            && window.ANGeo.matchAddress(f.properties, saisie).ok) || null;
+    } catch (e) { /* service indisponible : l'appelant affiche son message */ }
+    if (!trouve) return false;
+    const pr = trouve.properties;
+    out.innerHTML = `<div class="mt-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
+        <p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-circle-info mr-1"></i>La voie saisie n'existe pas à
+            ${esc(ici)}. Cette adresse se trouve à <strong>${esc(pr.district || pr.city || '')}</strong> :</p>
+        <button type="button" data-pick class="btn-secondary !text-xs !justify-start text-left"><i class="fa-solid fa-location-dot"></i>${esc(pr.label)} — voir son député</button>
+    </div>`;
+    const b = out.querySelector('[data-pick]');
+    b.addEventListener('click', () => showAddress(trouve, qv, out));
+    b.focus();
+    return true;
+}
+
+/** Aucun candidat sûr ne porte la voie saisie (les autres écarts — numéro, code postal — se confirment). */
+const voieAbsente = (feats, q) => !feats.some((f) => window.ANGeo.assessGeocode(f.properties, q, false).verdict === 'ok'
+    && window.ANGeo.matchAddress(f.properties, q).raison !== 'voie');
+
 /* Confirmation de l'adresse trouvée. Le géocodeur renvoie toujours « la plus proche » : dans Lyon 7e,
  * « 12 rue de la République » (2e arrondissement) devient « 12 Rue du Repos ». Si la voie ou le numéro trouvés
  * diffèrent de la saisie (ANGeo.matchAddress), les candidats sont proposés et rien n'est affiché sans un clic ;
  * sinon le résultat s'affiche directement, adresse reconnue en tête. Candidats sous le seuil de score : refusés. */
-function chooseAddress(out, q, feats, pick, refuse) {
+function chooseAddress(out, q, feats, pick, refuse, verifierCommune = false) {
     const sure = feats.filter((f) => window.ANGeo.assessGeocode(f.properties, q, false).verdict === 'ok');
     if (!sure.length) return refuse(feats[0] || null);
-    const m = sure.map((f) => ({ f, m: window.ANGeo.matchAddress(f.properties, q) }));
-    if (m[0].m.ok) return pick(sure[0]);
+    // verifierCommune (formulaire global) : la commune trouvée doit figurer dans la saisie (« 12 rue de la paix » → Cherbourg).
+    const m = sure.map((f) => {
+        const r = window.ANGeo.matchAddress(f.properties, q);
+        return { f, m: r.ok && verifierCommune && window.ANGeo.assessGeocode(f.properties, q, false).autreCommune ? { ok: false, raison: 'commune' } : r };
+    });
+    if (m[0].m.ok) return pick(sure[0], false);
     const cands = [...m.filter((x) => x.m.ok), ...m.filter((x) => !x.m.ok)].map((x) => x.f);  // les concordantes d'abord
     out.innerHTML = `<div class="mt-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
         <p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-circle-question mr-1"></i>${m[0].m.raison === 'numero'
             ? 'Ce numéro n\'a pas été trouvé : la position serait celle de la voie, pas de votre numéro.'
             : m[0].m.raison === 'codePostal' ? 'L\'adresse trouvée n\'a pas le code postal saisi.'
+            : m[0].m.raison === 'commune' ? 'Votre saisie ne précise pas la commune : plusieurs adresses sont possibles.'
             : 'L\'adresse trouvée ne correspond pas exactement à votre saisie.'} Confirmez votre adresse avant d'afficher le député :</p>
         <div class="flex flex-col gap-1.5">${cands.map((f, i) => `<button type="button" data-pick="${i}"
             class="btn-secondary !text-xs !justify-start text-left"><i class="fa-solid fa-location-dot"></i>${esc(f.properties.label)}</button>`).join('')}</div>
         <p class="text-[11px] text-slate-500">Aucune ne correspond ? Corrigez l'adresse (numéro, voie, commune) et relancez la recherche.</p>
     </div>`;
-    out.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pick(cands[Number(b.dataset.pick)])));
+    out.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pick(cands[Number(b.dataset.pick)], true)));
     out.querySelector('[data-pick]').focus();
 }
 
@@ -970,8 +1007,8 @@ function globalAddressForm(i) {
 
 const deptFromInsee = (code) => (/^97/.test(code) ? code.slice(0, 3) : code.slice(0, 2));
 
-const adresseIncertaine = (label) => `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse non reconnue avec certitude${label
-    ? ` (correspondance la plus proche : « ${esc(label)} »)` : ''}. Indiquez le numéro, la voie et la commune, ou utilisez la recherche par commune.
+const adresseIncertaine = (label) => `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse non reconnue${label
+    ? ` (le service ne propose qu'une autre adresse, « ${esc(label)} », écartée)` : ''}. Vérifiez le numéro, la voie et la commune, ou utilisez la recherche par commune.
     Wallis-et-Futuna et les adresses à l'étranger ne sont pas couverts par la recherche par adresse.</p>`;
 
 async function resolveAddress(q, out) {
@@ -988,7 +1025,12 @@ async function resolveAddress(q, out) {
         return;
     }
     await loadCommunes();
-    chooseAddress(out, q, feats, (f) => showAddress(f, q, out), (f) => { out.innerHTML = adresseIncertaine(f && f.properties.label); });
+    if (voieAbsente(feats, q)) {
+        const pr = feats[0].properties;
+        if (pr.city && await voieAilleurs(q, pr.city, pr.district || pr.city, pr.citycode, out)) return;
+    }
+    chooseAddress(out, q, feats, (f, confirme) => showAddress(f, confirme ? `${q} ${f.properties.city || ''}` : q, out),
+        (f) => { out.innerHTML = adresseIncertaine(f && f.properties.label); }, true);
 }
 
 /** Député de l'adresse confirmée `f` (feature du géocodeur) ; `q` = saisie. */
@@ -1081,9 +1123,12 @@ function bindAddress() {
         out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
         try {
             const feats = await geocode(q, box);
-            const refuse = (f) => {
-                out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable à ${esc(box.dataset.nom)}${f
-                    ? ` (correspondance la plus proche, trop incertaine : « ${esc(f.properties.label)} »)` : ''}. Ajoutez le numéro et le nom de la voie.</p>`;
+            const ailleurs = () => voieAilleurs(q, box.dataset.ville || box.dataset.nom, box.dataset.nom, box.dataset.insee, out);
+            const refuse = async () => {
+                if (await ailleurs()) return;
+                out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Aucune adresse « ${esc(q)} » trouvée à ${esc(box.dataset.nom)}.
+                    Vérifiez le numéro et l'orthographe de la voie ; si vous n'êtes pas sûr de la commune ou de l'arrondissement, utilisez
+                    « Trouver mon député par adresse » (pages Députés et Recherche).</p>`;
             };
             const pick = (f) => {
                 if (window.ANGeo.assessGeocode(f.properties, q, true).verdict === 'commune') {
@@ -1093,6 +1138,10 @@ function bindAddress() {
                 const [lon, lat] = f.geometry.coordinates;
                 return locate(box, lon, lat, f.properties.label);
             };
+            if (!feats.length) { await refuse(); return; }
+            // Aucun candidat de la commune ne correspond à la voie saisie (« 8 rue Victor Hugo » dans Lyon 7e → « Victor
+            // Lagrange ») : la voie est peut-être ailleurs dans la ville ; sinon, confirmation parmi les candidats.
+            if (voieAbsente(feats, q) && await ailleurs()) return;
             chooseAddress(out, q, feats, pick, refuse);
         } catch (err) {
             out.innerHTML = `<p class="text-xs text-rose-600">Service de localisation indisponible (${esc(err.message)}). Réessayez plus tard, ou consultez votre carte électorale.</p>`;
