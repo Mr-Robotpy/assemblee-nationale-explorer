@@ -6,8 +6,8 @@ labels: donnees-personnelles
 ---
 
 > ⚠️ **Cette issue est publique.** N'indiquez aucune information personnelle qui ne soit pas déjà publique
-> (adresse, téléphone, pièce d'identité…). Si votre demande l'exige, indiquez-le simplement : un autre moyen
-> d'échange vous sera proposé.
+> (adresse, téléphone, pièce d'identité…). Pour une demande qui ne doit pas être publique, écrivez plutôt à
+> jeremygforia@gmail.com (objet « Données personnelles »).
 
 **Page concernée** (copiez l'adresse, par exemple `…/#/depute/PA…`) :
 

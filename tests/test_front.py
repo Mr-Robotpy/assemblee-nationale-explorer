@@ -42,6 +42,13 @@ class MentionsTest(unittest.TestCase):
         self.assertIn("publique", tpl.read_text(encoding="utf-8"))  # avertissement : les issues sont publiques
         self.assertIn("template=donnees-personnelles.md", INDEX)
 
+    def test_contact_non_public(self):
+        """Un moyen de contact privé (courriel) figure sur la page et dans le modèle d'issue (RGPD art. 12)."""
+        mails = set(re.findall(r'mailto:([^"?]+)', INDEX))
+        self.assertEqual(len(mails), 1)
+        tpl = (ROOT / ".github" / "ISSUE_TEMPLATE" / "donnees-personnelles.md").read_text(encoding="utf-8")
+        self.assertIn(mails.pop(), tpl)
+
 
 if __name__ == "__main__":
     unittest.main()

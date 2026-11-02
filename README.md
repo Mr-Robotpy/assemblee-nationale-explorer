@@ -142,8 +142,8 @@ copiés depuis les paquets npm figés dans `package.json` par `npm run vendor` (
 Page `#/mentions` (lien dans le pied de page) : éditeur (particulier non professionnel, LCEN art. 6-III-2), hébergeur,
 sources, vie privée des visiteurs (aucun cookie ni mesure d'audience ; `localStorage` local ; journaux de GitHub ;
 photos chargées depuis l'Assemblée), données personnelles des députés (source, finalité, base légale, durée) et
-exercice des droits via les issues (modèle `.github/ISSUE_TEMPLATE/donnees-personnelles.md`, qui rappelle que les issues
-sont publiques). À mettre à jour si le site ajoute un traitement (statistiques, formulaire…).
+exercice des droits par courriel (jeremygforia@gmail.com, contact non public, réponse sous un mois) ou par les issues (modèle
+`.github/ISSUE_TEMPLATE/donnees-personnelles.md`, qui rappelle que les issues sont publiques et renvoie au courriel). À mettre à jour si le site ajoute un traitement (statistiques, formulaire…).
 
 ## En local
 
