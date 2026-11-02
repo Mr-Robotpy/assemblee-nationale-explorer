@@ -154,6 +154,9 @@ photo : les portraits de l'Assemblée ne sont pas réutilisables sans accord pr�
 2026) et les charger depuis son site transmettrait l'adresse IP des visiteurs. Le seul envoi à un tiers reste la recherche
 par adresse, à la demande de l'utilisateur.
 
+Lien « Soutenir le projet » (pied de page) vers [Ko-fi](https://ko-fi.com/mrrobotpy) : **simple lien**, sans le script
+ni l'image de bouton proposés par Ko-fi (qui transmettraient l'adresse IP de chaque visiteur) ; un test le vérifie.
+
 ## Mentions légales et données personnelles
 
 Page `#/mentions` (lien dans le pied de page) : éditeur (particulier non professionnel, LCEN art. 6-III-2), hébergeur,

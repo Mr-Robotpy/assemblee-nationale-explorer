@@ -289,10 +289,11 @@
     <section id="tab-mentions" class="tab-content hidden">
         <article class="card space-y-1 max-w-3xl mx-auto mentions text-sm leading-relaxed text-slate-700 dark:text-slate-200">
             <h2 class="text-xl font-bold text-slate-900 dark:text-white">Mentions légales et confidentialité</h2>
-            <p class="text-xs text-slate-500">Dernière mise à jour : 2 novembre 2026 (confirmation de l'adresse).</p>
+            <p class="text-xs text-slate-500">Dernière mise à jour : 2 novembre 2026 (lien de soutien Ko-fi).</p>
 
             <h3>Éditeur</h3>
-            <p>Ce site est édité par un particulier, à titre non professionnel et sans but lucratif. Conformément à l'article 6-III-2
+            <p>Ce site est édité par un particulier, à titre non professionnel. Il est gratuit et sans publicité ; les dons
+            (lien « Soutenir le projet », via Ko-fi) sont facultatifs et ne donnent droit à aucune contrepartie. Conformément à l'article 6-III-2
             de la loi n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique (LCEN), l'éditeur a choisi de ne pas
             rendre publique son identité ; les éléments permettant de l'identifier ont été communiqués à l'hébergeur.</p>
             <p>Contact : <a href="mailto:jeremygforia@gmail.com">jeremygforia@gmail.com</a> (courriel, réponse non publique) ou
@@ -335,6 +336,9 @@
                 la cherche dans toute la ville) ; la circonscription est ensuite calculée dans votre navigateur. Ce site ne
                 conserve pas l'adresse, ne la place pas dans l'URL et ne la transmet à personne d'autre. Le traitement par l'API Adresse relève
                 de ses propres conditions. Base légale : votre demande explicite, à chaque recherche.</li>
+                <li><strong>Lien « Soutenir le projet »</strong> : simple lien vers Ko-fi, sans script ni image de ce service ; aucune donnée
+                n'est transmise avant le clic. Sur Ko-fi, ses conditions et sa politique de confidentialité s'appliquent, ainsi que celles
+                du moyen de paiement choisi.</li>
                 <li><strong>« Me localiser » (facultatif)</strong> : votre navigateur vous demande l'autorisation ; la position est utilisée
                 uniquement sur votre appareil pour trouver la circonscription, sans aucun envoi.</li>
                 <li><strong>Aucune image tierce</strong> : les députés sont représentés par leurs initiales, sans photo. Leurs portraits
@@ -418,10 +422,12 @@
 <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-xs text-slate-500 dark:text-slate-400">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
         <p>Projet indépendant, non affilié à l'Assemblée nationale. Données : Assemblée nationale, <a class="underline" href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener">Licence Ouverte 2.0</a>.</p>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <a href="#/mentions" class="hover:underline">Mentions légales et confidentialité</a>
             <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hover:underline">Portail Open Data</a>
             <a href="https://github.com/mr-robotpy/assemblee-nationale-explorer" target="_blank" rel="noopener" class="hover:underline"><i class="fa-brands fa-github"></i> Code source</a>
+            <!-- Simple lien : aucun script ni image de Ko-fi, rien n'est transmis avant le clic. -->
+            <a href="https://ko-fi.com/mrrobotpy" target="_blank" rel="noopener noreferrer" class="hover:underline"><i class="fa-solid fa-mug-hot"></i> Soutenir le projet</a>
         </div>
     </div>
 </footer>

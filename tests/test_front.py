@@ -19,6 +19,11 @@ class VendorTest(unittest.TestCase):
         self.assertNotIn("<img", app)
         self.assertEqual(re.findall(r'<img[^>]+src="https?://', INDEX), [])
 
+    def test_kofi_simple_lien(self):
+        """Ko-fi : un lien seulement, jamais son script ou son image de bouton (ils transmettraient l'IP des visiteurs)."""
+        self.assertIn('href="https://ko-fi.com/mrrobotpy"', INDEX)
+        self.assertEqual(re.findall(r'(?:src|srcset|data-src)="[^"]*ko-?fi', INDEX, re.I), [])
+
     def test_fichiers_references_presents(self):
         """Chaque fichier assets/vendor référencé existe (sinon : relancer `npm run vendor`)."""
         refs = re.findall(r'(?:src|href)="(assets/vendor/[^"?]+)"', INDEX)
