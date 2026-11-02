@@ -1204,6 +1204,90 @@ def update_communes(out: Path, cache: Path, source_dir: Path | None, deputes_key
     return {"majLe": now, **stats}
 
 
+# --------------------------------------------------------------------------- contours des circonscriptions
+# Pour préciser la circonscription à partir d'une adresse dans une commune (ou un arrondissement) partagée.
+# Source : data.gouv « Contours géographiques des circonscriptions législatives » (juin 2024, Licence Ouverte).
+# Seuls les départements contenant une commune partagée sont publiés, un fichier par département
+# (data/circos/<dept>.json), chargé à la demande par le navigateur : le calcul de la circonscription s'y fait
+# localement (point dans polygone), seul le géocodage de l'adresse passe par l'API Adresse.
+
+CIRCOS_URL = ("https://static.data.gouv.fr/resources/contours-geographiques-des-circonscriptions-legislatives/"
+              "20240613-191506/circonscriptions-legislatives-p20.geojson")
+CIRCOS_FILE = "circonscriptions-legislatives-p20.geojson"
+CIRCOS_VERSION = 1
+CIRCOS_DECIMALES = 5  # ≈ 1 m : bien plus fin que la précision de la source (généralisée à ~20 m)
+# Codes « Z » du ministère de l'Intérieur → codes de département de l'AN
+CIRCOS_DEPT_Z = {"ZA": "971", "ZB": "972", "ZC": "973", "ZD": "974", "ZM": "976", "ZS": "975",
+                 "ZN": "988", "ZP": "987", "ZW": "986", "ZX": "977", "ZZ": "099"}
+
+
+def _arrondir(c):
+    if isinstance(c, (int, float)):
+        return round(c, CIRCOS_DECIMALES)
+    return [_arrondir(x) for x in c]
+
+
+def build_circos(geojson: dict, departements: set[str]) -> dict[str, dict]:
+    """GeoJSON national → {département AN: FeatureCollection {circo, géométrie}} pour les départements demandés."""
+    par_dept: dict[str, list] = defaultdict(list)
+    for f in geojson.get("features", []):
+        p = f.get("properties") or {}
+        dz, cc = str(p.get("codeDepartement") or "").strip(), str(p.get("codeCirconscription") or "").strip()
+        geom = f.get("geometry") or {}
+        if not dz or not cc or geom.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        dept = CIRCOS_DEPT_Z.get(dz, _dept_an(dz))
+        if dept not in departements:
+            continue
+        num = re.sub(r"\D", "", cc[len(dz):]) if cc.startswith(dz) else re.sub(r"\D", "", cc)[-2:]
+        if not num:
+            continue
+        par_dept[dept].append({"type": "Feature", "properties": {"circo": int(num)},
+                               "geometry": {"type": geom["type"], "coordinates": _arrondir(geom["coordinates"])}})
+    return {d: {"type": "FeatureCollection", "features": sorted(fs, key=lambda x: x["properties"]["circo"])}
+            for d, fs in par_dept.items()}
+
+
+def update_circos(out: Path, cache: Path, source_dir: Path | None, meta: dict, now: str, force: bool = False) -> dict | None:
+    """Publie data/circos/<dept>.json pour les départements où une commune est partagée entre circonscriptions."""
+    prev = meta.get("sections", {}).get("circos", {})
+    target = out / "circos"
+    communes_path = out / "communes.json"
+    if not communes_path.exists():
+        LOG.info("Contours : pas de table des communes, section ignorée")
+        return None
+    if target.exists() and not force and prev.get("majLe") and prev.get("version") == CIRCOS_VERSION:
+        age = (datetime.strptime(now[:10], "%Y-%m-%d") - datetime.strptime(prev["majLe"][:10], "%Y-%m-%d")).days
+        if age < COMMUNES_MAX_AGE_DAYS:
+            LOG.info("Contours : fichiers du %s conservés (%d j)", prev["majLe"][:10], age)
+            return None
+    lignes = json.loads(communes_path.read_text(encoding="utf-8")).get("c", [])
+    attendus: dict[str, set[int]] = defaultdict(set)  # département → circonscriptions des communes partagées
+    for l in lignes:
+        if len(l[4]) > 1:
+            attendus[l[3]].update(l[4])
+    src = (source_dir or cache) / CIRCOS_FILE
+    if source_dir and not src.exists():
+        LOG.info("Contours : %s absent, section ignorée", src)
+        return None
+    if not source_dir:
+        LOG.info("Téléchargement %s", CIRCOS_URL)
+        download_file(CIRCOS_URL, src)
+    par_dept = build_circos(json.loads(src.read_text(encoding="utf-8")), set(attendus))
+    manquants = sorted(f"{d}-{c}" for d, cs in attendus.items()
+                       for c in cs if c not in {f["properties"]["circo"] for f in par_dept.get(d, {}).get("features", [])})
+    if len(par_dept) < len(attendus) * 0.9:
+        raise RuntimeError(f"contours incomplets : {len(par_dept)} départements sur {len(attendus)} attendus")
+    reset_dir(target)
+    for d, fc in par_dept.items():
+        write_json(target / f"{d}.json", fc)
+    taille = sum(f.stat().st_size for f in target.glob("*.json"))
+    LOG.info("Contours : %d départements, %d Ko, %d circonscriptions attendues absentes %s",
+             len(par_dept), taille // 1024, len(manquants), manquants[:10])
+    return {"majLe": now, "version": CIRCOS_VERSION, "departements": len(par_dept), "octets": taille,
+            "circonscriptionsAbsentes": manquants, "source": CIRCOS_URL}
+
+
 # --------------------------------------------------------------------------- orchestration
 
 def fetch_sources(names: Iterable[str], cache: Path, source_dir: Path | None) -> dict[str, Path]:
@@ -1248,6 +1332,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--all-procedures", action="store_true", help="inclure résolutions, commissions d'enquête…")
     ap.add_argument("--no-communes", action="store_true", help="ne pas construire la table commune → circonscription")
     ap.add_argument("--force-communes", action="store_true", help="reconstruire la table des communes même récente")
+    ap.add_argument("--force-circos", action="store_true", help="republier les contours de circonscriptions même récents")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(message)s")
@@ -1353,6 +1438,16 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             LOG.exception("Échec section communes (table précédente conservée)")
             failures.append("communes")
+
+    # --- contours des circonscriptions (recherche par adresse dans les communes partagées)
+    if not args.no_communes:
+        try:
+            k_meta = update_circos(out, args.cache, args.source_dir, meta, now, args.force_circos)
+            if k_meta:
+                meta["sections"]["circos"] = k_meta
+        except Exception:
+            LOG.exception("Échec section contours (fichiers précédents conservés)")
+            failures.append("circos")
 
     # --- députés (écrits en dernier : enrichis par les autres sections)
     # Une section en échec ne doit pas effacer les statistiques de la veille dans les fiches.

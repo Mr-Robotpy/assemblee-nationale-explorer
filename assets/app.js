@@ -267,6 +267,7 @@ async function init() {
     $('#detailBackdrop').addEventListener('click', (e) => { if (e.target.id === 'detailBackdrop') closeDetail(true); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(true); });
     bindSearch();
+    bindAddress();
     window.addEventListener('hashchange', onNavigate);
     window.addEventListener('popstate', onNavigate);
     bindFilters();
@@ -843,6 +844,117 @@ function deputeParCirco(dept, circ) {
     return state.deputesParCirco.get(`${dept}|${circ}`);
 }
 
+/* ---------------------------------------------------------------- « préciser avec mon adresse »
+ * Communes et arrondissements partagés : l'adresse est géocodée par l'API Adresse de l'État (seul envoi à un tiers,
+ * annoncé à côté du bouton et sur la page de confidentialité, à chaque recherche), puis la circonscription est trouvée
+ * dans le navigateur (data/circos/<dept>.json, assets/geo.js). « Me localiser » : position de l'appareil, aucun envoi.
+ * L'adresse n'est ni stockée ni mise dans l'URL. */
+const API_ADRESSE = 'https://api-adresse.data.gouv.fr/search/';
+const LIMITE_PROCHE_M = 100;  // en deçà, le résultat est signalé comme incertain (contours généralisés à ~20 m)
+
+function addressBlock(r) {
+    const [nom, insee, cps, dept, circs] = r;
+    return `<div data-addr data-insee="${esc(insee)}" data-dept="${esc(dept)}" data-circs="${esc(circs.join(','))}"
+            data-cp="${esc((cps || '').split(' ')[0] || '')}" data-nom="${esc(nom)}">
+        <button type="button" data-addr-open class="btn-secondary !text-xs"><i class="fa-solid fa-location-crosshairs"></i>Préciser avec mon adresse</button>
+    </div>`;
+}
+
+function addressForm(box) {
+    const nom = box.dataset.nom;
+    box.innerHTML = `<form data-addr-form class="space-y-2 p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+        <label class="block text-xs font-medium text-slate-700 dark:text-slate-200" for="addr-${esc(box.dataset.insee)}">Votre adresse à ${esc(nom)}</label>
+        <div class="flex gap-2">
+            <input id="addr-${esc(box.dataset.insee)}" name="adresse" required minlength="3" autocomplete="street-address"
+                placeholder="ex. 12 rue de la République" class="input !text-sm">
+            <button class="btn-primary whitespace-nowrap">Chercher</button>
+        </div>
+        <p class="text-[11px] text-slate-500 dark:text-slate-400"><i class="fa-solid fa-shield-halved mr-1"></i>En cliquant sur « Chercher », l'adresse saisie est
+            envoyée à l'<strong>API Adresse de l'État</strong> (api-adresse.data.gouv.fr) pour être localisée. Ce site ne la conserve pas et ne la transmet
+            à personne d'autre. <a class="underline" href="#/mentions">Confidentialité</a></p>
+        <button type="button" data-geoloc class="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+            <i class="fa-solid fa-location-arrow mr-1"></i>Ou me localiser (calcul sur votre appareil, rien n'est envoyé)</button>
+        <div data-addr-result aria-live="polite" class="text-sm"></div>
+    </form>`;
+    box.querySelector('input').focus();
+}
+
+async function geocode(q, box) {
+    const ask = async (extra) => {
+        const p = new URLSearchParams({ q, limit: '3', autocomplete: '0', ...extra });
+        const res = await fetch(`${API_ADRESSE}?${p}`, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (!res.ok) throw new Error(`API Adresse : ${res.status}`);
+        return (await res.json()).features || [];
+    };
+    let f = await ask({ citycode: box.dataset.insee });
+    if (!f.length && box.dataset.cp) f = await ask({ postcode: box.dataset.cp });
+    return f[0] || null;
+}
+
+async function locate(box, lon, lat, label) {
+    const out = box.querySelector('[data-addr-result]');
+    const circs = box.dataset.circs.split(',').map(Number);
+    let fc;
+    try { fc = await getJSON(`circos/${box.dataset.dept}.json`); } catch (e) {
+        out.innerHTML = `<p class="text-rose-600 text-xs">Contours des circonscriptions indisponibles (${esc(e.message)}). La carte électorale indique votre circonscription.</p>`;
+        return;
+    }
+    const hit = window.ANGeo.findCirco(fc.features || [], lon, lat, circs);
+    const card = box.closest('.p-3');
+    card.querySelectorAll('[data-circ]').forEach((el) => el.classList.remove('ring-2', 'ring-emerald-500'));
+    if (!hit) {
+        out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">${label
+            ? `« ${esc(label)} » n'est dans aucune des circonscriptions de ${esc(box.dataset.nom)}. Vérifiez l'adresse, ou consultez votre carte électorale.`
+            : `Vous ne semblez pas vous trouver à ${esc(box.dataset.nom)} : « Me localiser » ne sert que sur place. Saisissez plutôt votre adresse.`}</p>`;
+        return;
+    }
+    const target = card.querySelector(`[data-circ="${hit.circo}"]`);
+    if (target) target.classList.add('ring-2', 'ring-emerald-500');
+    const d = deputeParCirco(box.dataset.dept, String(hit.circo));
+    const proche = hit.distanceM < LIMITE_PROCHE_M;
+    out.innerHTML = `<div class="mt-2 p-2 rounded-lg ${proche ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20'} space-y-1">
+        ${label ? `<p class="text-xs text-slate-500">Adresse reconnue : <strong class="text-slate-700 dark:text-slate-200">${esc(label)}</strong></p>` : ''}
+        <p><i class="fa-solid fa-check text-emerald-600 mr-1"></i>${ordinal(hit.circo)} circonscription${d ? ` — <a class="font-semibold underline" href="#/depute/${esc(d.uid)}">${esc(d.prenom)} ${esc(d.nom)}</a>` : ''}</p>
+        ${proche ? `<p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-triangle-exclamation mr-1"></i>À environ ${Math.round(hit.distanceM)} m d'une limite
+            de circonscription : les contours utilisés sont approximatifs. Vérifiez sur votre carte électorale.</p>` : ''}
+        <p class="text-[11px] text-slate-500">Résultat indicatif, calculé à partir des contours publiés en 2024 ; la carte électorale fait foi.</p>
+    </div>`;
+}
+
+function bindAddress() {
+    document.addEventListener('click', (e) => {
+        const open = e.target.closest('[data-addr-open]');
+        if (open) { addressForm(open.closest('[data-addr]')); return; }
+        const geo = e.target.closest('[data-geoloc]');
+        if (!geo) return;
+        const box = geo.closest('[data-addr]');
+        const out = box.querySelector('[data-addr-result]');
+        if (!navigator.geolocation) { out.innerHTML = '<p class="text-xs text-rose-600">Géolocalisation non disponible dans ce navigateur.</p>'; return; }
+        out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Localisation…</p>';
+        navigator.geolocation.getCurrentPosition(
+            (pos) => locate(box, pos.coords.longitude, pos.coords.latitude, null),
+            (err) => { out.innerHTML = `<p class="text-xs text-rose-600">Position indisponible (${esc(err.message || 'refusée')}).</p>`; },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });  // position fraîche, jamais une position en cache
+    });
+    document.addEventListener('submit', async (e) => {
+        const form = e.target.closest('[data-addr-form]');
+        if (!form) return;
+        e.preventDefault();
+        const box = form.closest('[data-addr]');
+        const out = box.querySelector('[data-addr-result]');
+        const q = form.adresse.value.trim();
+        out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
+        try {
+            const f = await geocode(q, box);
+            if (!f) { out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable à ${esc(box.dataset.nom)}. Ajoutez le numéro et le nom de la voie.</p>`; return; }
+            const [lon, lat] = f.geometry.coordinates;
+            await locate(box, lon, lat, f.properties.label);
+        } catch (err) {
+            out.innerHTML = `<p class="text-xs text-rose-600">Service de localisation indisponible (${esc(err.message)}). Réessayez plus tard, ou consultez votre carte électorale.</p>`;
+        }
+    });
+}
+
 /** Couverture de la table : { total, ok, non } (communes actuelles hors arrondissements), ou null si inconnue. */
 function communeCoverage() {
     const c = state.communes && state.communes.couverture;
@@ -941,11 +1053,12 @@ function renderCommunes(q, toks) {
             <p class="text-sm"><span class="font-bold text-slate-900 dark:text-white">${esc(nom)}</span>
                 <span class="text-slate-500">· ${esc(deptNom)} (${esc(dept)})${cps ? ` · ${esc(cps)}` : ''}</span></p>
             ${circs.length > 1 ? `<p class="text-xs text-amber-700 dark:text-amber-300"><i class="fa-solid fa-circle-info mr-1"></i>${r[6] ? 'Arrondissement partagé' : 'Commune partagée'} entre ${circs.length} circonscriptions : la vôtre figure sur votre carte électorale.</p>` : ''}
-            <div class="grid sm:grid-cols-2 gap-2">${deps.map(({ c, d }) => (d
-        ? `<a href="#/depute/${esc(d.uid)}" class="row-link !p-2 flex items-center gap-3 bg-white dark:bg-slate-800">${avatar(d, 'w-9 h-9')}
+            <div class="grid sm:grid-cols-2 gap-2" data-circ-list>${deps.map(({ c, d }) => (d
+        ? `<a href="#/depute/${esc(d.uid)}" data-circ="${esc(c)}" class="row-link !p-2 flex items-center gap-3 bg-white dark:bg-slate-800">${avatar(d, 'w-9 h-9')}
                 <span class="min-w-0"><span class="block font-semibold text-sm text-slate-900 dark:text-white truncate">${esc(d.prenom)} ${esc(d.nom)} ${groupBadge(d.groupe, d.groupeUid)}</span>
                 <span class="block text-xs text-slate-500">${ordinal(c)} circonscription</span></span></a>`
-        : `<p class="text-xs text-slate-500 p-2">${ordinal(c)} circonscription : siège vacant ou député introuvable dans les données.</p>`)).join('')}</div>
+        : `<p data-circ="${esc(c)}" class="text-xs text-slate-500 p-2">${ordinal(c)} circonscription : siège vacant ou député introuvable dans les données.</p>`)).join('')}</div>
+            ${circs.length > 1 ? addressBlock(r) : ''}
         </div>`;
     };
     const more = hits.length > COMMUNE_PREVIEW

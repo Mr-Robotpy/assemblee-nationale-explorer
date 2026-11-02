@@ -48,6 +48,14 @@ Limites, affichées dans le bloc « Votre député par commune » (« Limites de
   rattachées (une vingtaine) : elles ne sont pas devinées, mais listées dans `communes.json` (`nonRattachees`) et
   signalées comme telles si on les cherche. Le taux de couverture affiché est arrondi par défaut.
 
+**Préciser avec son adresse** (communes et arrondissements partagés) : l'adresse est géocodée par l'API Adresse de
+l'État (`api-adresse.data.gouv.fr`) — seul envoi à un tiers, déclenché par l'utilisateur à chaque recherche et annoncé à
+côté du bouton — puis la circonscription est calculée dans le navigateur (point dans polygone, `assets/geo.js`) à partir
+de `data/circos/<dept>.json`. Ces fichiers sont tirés des « Contours géographiques des circonscriptions législatives »
+(data.gouv, juin 2024, contours généralisés) pour les seuls départements comptant une commune partagée. À moins de
+100 m d'une limite, le résultat est signalé comme incertain ; la carte électorale fait foi. « Me localiser » utilise la
+position de l'appareil, sans envoi.
+
 Le format de la table est versionné (`COMMUNES_VERSION`) : un changement de format force le recalcul sans attendre
 les 30 jours.
 
@@ -129,6 +137,7 @@ sont publiques). À mettre à jour si le site ajoute un traitement (statistiques
 python scripts/build_data.py          # télécharge ~90 Mo d'archives et génère data/ (quelques minutes)
 python -m http.server 8000            # puis http://localhost:8000
 python -m unittest discover -s tests  # tests hors ligne sur des extraits réels de l'Open Data
+node --test tests/*.test.mjs           # tests de géométrie (recherche par adresse)
 npm ci && npm run build:css           # uniquement si vous modifiez les classes Tailwind
 ```
 
