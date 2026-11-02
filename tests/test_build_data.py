@@ -35,7 +35,7 @@ class BuildDataTest(unittest.TestCase):
         make_zip(FIX / "qe", zips / name("questions_ecrites"))
         make_zip(FIX / "qg", zips / name("questions_gouvernement"))
         cls.out = tmp / "data"
-        rc = bd.main(["--source-dir", str(zips), "--out", str(cls.out), "--no-fulltext", "--all-procedures"])
+        rc = bd.main(["--source-dir", str(zips), "--out", str(cls.out), "--no-fulltext"])  # toutes procédures : défaut
         assert rc == 0
 
     @classmethod
@@ -76,7 +76,7 @@ class BuildDataTest(unittest.TestCase):
     def test_dossiers(self):
         index = self.load("dossiers.json")
         uids = {d["uid"] for d in index}
-        self.assertIn("DLR5L17N50173", uids)
+        self.assertEqual(uids, {"DLR5L17N50173", "DLR5L17N52898"})  # défaut : tous les dossiers, toutes procédures
         d = self.load("dossiers/DLR5L17N50173.json")
         self.assertEqual(d["categorie"], "PJL")
         self.assertEqual(d["textePrincipal"], "PRJLANR5L17B0004")
@@ -104,6 +104,42 @@ class BuildDataTest(unittest.TestCase):
         meta = self.load("meta.json")
         self.assertIn("generation", meta)
         self.assertEqual(meta["sections"]["deputes"]["total"], 6)
+
+
+class DossiersCompletsTest(unittest.TestCase):
+    def test_tous_les_dossiers_par_defaut(self):
+        """max_dossiers = 0 (défaut) : aucun dossier écarté, autres procédures comprises."""
+        with tempfile.TemporaryDirectory() as t:
+            z = Path(t) / "dossiers.zip"
+            make_zip(FIX / "dossiers", z)
+            index, by_uid, meta = bd.build_dossiers(z, bd.Referentiel(), 0, {"PJL", "PPL", "AUTRE"})
+            total = sum(v for k, v in meta["total"].items() if not k.endswith("_promulgues"))
+            self.assertEqual(len(index), total)
+            self.assertEqual(set(by_uid), {d["uid"] for d in index})
+
+    def test_perimetre_des_textes_integraux(self):
+        """Textes intégraux : projets de loi + dossiers les plus récemment actifs ; les autres renvoient à l'AN."""
+        d = lambda uid, cat, maj: {"uid": uid, "categorie": cat, "dateMaj": maj, "textePrincipal": f"PIONANR5L17B{uid}"}
+        dossiers = {x["uid"]: x for x in [d("1", "PJL", "2024-10-01"), d("2", "PPL", "2026-10-01"),
+                                           d("3", "PPL", "2026-09-01"), d("4", "AUTRE", "2025-01-01")]}
+        appels = []
+        def faux_get(url, **kw):
+            appels.append(url)
+            return ("<html><body><p>" + "Article premier. " * 30 + "</p></body></html>").encode()
+        orig_get, orig_sleep = bd.http_get, bd.time.sleep
+        bd.http_get, bd.time.sleep = faux_get, (lambda s: None)
+        try:
+            with tempfile.TemporaryDirectory() as t:
+                textes = Path(t) / "textes"
+                textes.mkdir()
+                (textes / "PIONANR5L17B4.json").write_text("{}")  # archivé autrefois, hors périmètre : supprimé
+                n = bd.fetch_fulltexts(dossiers, textes, max_new=10, delay=0, perimetre=2)
+                self.assertEqual(n, 2)
+                self.assertEqual(sorted(f.stem for f in textes.glob("*.json")), ["PIONANR5L17B1", "PIONANR5L17B2"])
+        finally:
+            bd.http_get, bd.time.sleep = orig_get, orig_sleep
+        self.assertEqual({k: v["texteIntegral"] for k, v in dossiers.items()}, {"1": True, "2": True, "3": False, "4": False})
+        self.assertEqual(len(appels), 2)
 
 
 class ProjetsDeLoiTest(unittest.TestCase):

@@ -87,9 +87,12 @@ position de l'appareil, sans envoi.
 Le format de la table est versionné (`COMMUNES_VERSION`) : un changement de format force le recalcul sans attendre
 les 30 jours.
 
-Volumes publiés (modifiables via variables d'environnement ou options CLI) : 400 dossiers (dont **tous** les
-projets de loi, complétés par les propositions les plus récemment actives), 300 scrutins,
-3 000 questions écrites, 1 500 questions au Gouvernement, 800 questions orales. Les statistiques (participation,
+Volumes publiés (modifiables via variables d'environnement ou options CLI) : **tous** les dossiers de la législature
+(≈ 3 400 : projets et propositions de loi, résolutions, commissions d'enquête… ; index ≈ 2,2 Mo brut, ≈ 220 Ko
+compressé), 300 scrutins, 3 000 questions écrites, 1 500 questions au Gouvernement, 800 questions orales.
+Textes intégraux archivés pour tous les projets de loi et les dossiers les plus récemment actifs, 400 au total
+(`MAX_TEXTES` / `--max-textes`, 60 nouveaux par passage) ; pour les autres, la fiche renvoie au texte officiel
+(HTML et PDF de l'Assemblée, ou dossiers de l'Assemblée et du Sénat pour un texte déposé au Sénat). Les statistiques (participation,
 nombre de questions…) sont calculées sur **toute** la législature.
 
 ### Pourquoi une branche `data` séparée ?
@@ -104,7 +107,8 @@ nombre de questions…) sont calculées sur **toute** la législature.
 
 ### Pourquoi plafonner le volume ?
 
-L'index des questions est chargé à la première ouverture de l'onglet Questions ; avec toutes les questions écrites
+Les dossiers sont tous publiés (index léger, quelques centaines de Ko compressés). L'index des questions est chargé
+à la première ouverture de l'onglet Questions ; avec toutes les questions écrites
 de la législature (plus de 20 000), il pèserait plusieurs Mo (estimation) et rendrait l'onglet lent sur mobile. Les plafonds
 ne concernent que l'affichage : les compteurs et statistiques couvrent toute la législature.
 
@@ -123,8 +127,9 @@ les boutons Précédent / Suivant du navigateur parcourent les recherches, et «
 
 La recherche (champ de l'en-tête, raccourci `/`) exige que **tous les mots** apparaissent, sans tenir compte des accents
 ni des majuscules — la même règle que les listes, pour que « Voir les N résultats » ouvre une liste de N éléments.
-Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice) ou **sélection publiée**
-(lois, questions, scrutins), avec le total de la législature.
+Chaque groupe de résultats affiche son périmètre : **liste complète** (députés en exercice, dossiers de loi) ou
+**sélection publiée** (questions, scrutins), avec le total de la législature. Le statut « liste complète » des lois est
+calculé (publiés ≥ total de la législature) : il disparaît si un plafond `MAX_DOSSIERS` est fixé.
 
 ## Suivis
 
@@ -172,8 +177,9 @@ node --test tests/*.test.mjs           # tests de géométrie (recherche par adr
 npm ci && npm run build:css           # uniquement si vous modifiez les classes Tailwind
 ```
 
-Options utiles : `--max-qe 0` (toutes les questions écrites), `--all-procedures` (inclut résolutions,
-commissions d'enquête…), `--no-fulltext`, `--source-dir <dossier de ZIP>` (hors ligne).
+Options utiles : `--max-qe 0` (toutes les questions écrites), `--lois-seulement` (exclut résolutions, commissions
+d'enquête…, incluses par défaut), `--max-dossiers N` (plafond, 0 = tous par défaut), `--max-textes N`, `--no-fulltext`,
+`--source-dir <dossier de ZIP>` (hors ligne).
 
 ## Licence
 
