@@ -4,6 +4,7 @@ import json
 import sys
 import threading
 import tempfile
+import re
 import unittest
 import zipfile
 from pathlib import Path
@@ -65,10 +66,17 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(rn["couleur"], "#313567")
 
     def test_scrutins_et_participation(self):
-        sc = self.load("scrutins.json")
-        self.assertEqual(sc[0]["numero"], 4003)
-        self.assertEqual(sc[0]["sort"], "adopté")
-        self.assertTrue(sc[0]["groupes"])
+        doc = self.load("scrutins.json")
+        self.assertEqual(doc["format"], bd.SCRUTINS_FORMAT)
+        ligne = doc["s"][0]
+        self.assertEqual(ligne[0], 4003)
+        self.assertEqual(doc["sorts"][ligne[4]], "adopté")
+        self.assertTrue(ligne[12])  # scrutin récent : détail par groupe
+        groupe, position = ligne[12][0][0], ligne[12][0][1]
+        self.assertEqual(len(doc["groupes"][groupe]), 3)  # [uid, abrev, couleur]
+        self.assertIn(doc["positions"][position], ("pour", "contre", "abstention"))
+        derniers = self.load("meta.json")["sections"]["scrutins"]["derniers"]
+        self.assertEqual(derniers[0]["numero"], 4003)
         fiche = self.load("deputes/PA841495.json")  # a voté "contre" dans ce scrutin
         self.assertEqual(fiche["scrutins"]["votes"], 1)
         self.assertEqual(fiche["scrutins"]["derniers"][0]["position"], "contre")
@@ -106,6 +114,46 @@ class BuildDataTest(unittest.TestCase):
         meta = self.load("meta.json")
         self.assertIn("generation", meta)
         self.assertEqual(meta["sections"]["deputes"]["total"], 6)
+
+
+class ScrutinsCompactsTest(unittest.TestCase):
+    def sc(self, numero, groupes=None, **kw):
+        base = {"uid": f"VTANR5L17V{numero}", "numero": numero, "date": "2026-01-02", "titre": f"S{numero}",
+                "type": "scrutin public ordinaire", "sort": "adopté", "demandeur": None, "votants": 10, "exprimes": 9,
+                "requis": 5, "pour": 6, "contre": 3, "abstention": 1, "groupes": groupes, "url": "…"}
+        return base | kw
+
+    def test_format_en_colonnes(self):
+        g = {"uid": "PO1", "abrev": "EPR", "couleur": "#000", "membres": 90, "position": "pour", "pour": 6,
+             "contre": 0, "abstention": 0, "nonVotant": 1}
+        doc = bd.compact_scrutins([self.sc(12, [g]), self.sc(11, sort="rejeté", demandeur="Président du groupe X"),
+                                   self.sc(10, uid="AUTRE")])
+        a, b, c = doc["s"]
+        self.assertEqual(a, [12, "2026-01-02", "S12", 0, 0, -1, 10, 9, 5, 6, 3, 1, [[0, 0, 6, 0, 0, 1, 90]]])
+        self.assertEqual(b[3:6], [0, 1, 0])
+        self.assertEqual(b[12], 0)              # scrutin ancien : pas de détail par groupe
+        self.assertEqual(c[13], "AUTRE")        # uid hors modèle : ajouté en fin de ligne
+        self.assertEqual(doc["groupes"], [["PO1", "EPR", "#000"]])
+        self.assertEqual(doc["sorts"], ["adopté", "rejeté"])
+        self.assertEqual(len(a), len(bd.SCRUTINS_COLONNES))
+
+    def test_groupes_des_seuls_recents(self):
+        """max_recent = 1 : tous les scrutins dans l'index, groupes pour le plus récent seulement."""
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "sc"
+            src.mkdir()
+            fix = next((FIX / "scrutins").rglob("*.json"))
+            brut = fix.read_text(encoding="utf-8")
+            (src / fix.name).write_text(brut, encoding="utf-8")
+            vieux = re.sub(r'"numero": ?"4003"', '"numero": "12"', brut).replace("VTANR5L17V4003", "VTANR5L17V12")
+            (src / "VTANR5L17V12.json").write_text(vieux, encoding="utf-8")
+            z = Path(t) / "sc.zip"
+            make_zip(src, z)
+            sc, meta = bd.build_scrutins(z, bd.Referentiel(), {}, 1, 15)
+            self.assertEqual([x["numero"] for x in sc], [4003, 12])
+            self.assertIsNotNone(sc[0]["groupes"])
+            self.assertIsNone(sc[1]["groupes"])
+            self.assertEqual(meta["total"], 2)
 
 
 class QuestionsCompactesTest(unittest.TestCase):
