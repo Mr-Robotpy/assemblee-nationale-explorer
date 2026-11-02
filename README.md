@@ -51,11 +51,18 @@ Limites, affichées dans le bloc « Votre député par commune » (« Limites de
 **Trouver son député par adresse**, quelle que soit la commune (champ distinct sur les pages Députés et Recherche) :
 l'adresse est géocodée par l'API Adresse ; si la commune n'a qu'une circonscription, la table des communes répond
 directement ; sinon (commune partagée ou non rattachée), la circonscription est calculée dans les contours du
-département. Non couverts : Français de l'étranger (hors de la Base Adresse Nationale) — recherche par ville
-(« Londres ») ; collectivités du Pacifique, à vérifier.
+département. Couverts (vérifié sur le site en novembre 2026) : métropole, Paris, Lyon et Marseille par arrondissement, DROM,
+Saint-Pierre-et-Miquelon, Saint-Barthélemy, Saint-Martin, Polynésie française, Nouvelle-Calédonie. Non couverts (hors de la
+Base Adresse Nationale) : Wallis-et-Futuna et Français de l'étranger — recherche par commune ou par ville (« Londres »).
+
+Contrôle de la réponse du géocodeur (`ANGeo.assessGeocode`, testé) : en dessous d'un score de 0,5 la réponse est refusée
+(« Mata-Utu » donnait une rue de Haute-Garonne) ; si seule la commune est reconnue alors qu'elle compte plusieurs
+circonscriptions, le site demande la voie plutôt que de calculer sur le centre de la commune ; si la commune trouvée ne
+figure pas dans la saisie (« 12 rue de la paix » → Cherbourg), le résultat est affiché avec un avertissement.
 
 **Préciser avec son adresse** (communes et arrondissements partagés) : l'adresse est géocodée par l'API Adresse de
-l'État (`api-adresse.data.gouv.fr`) — seul envoi à un tiers, déclenché par l'utilisateur à chaque recherche et annoncé à
+l'État, servie par la Géoplateforme de l'IGN (`data.geopf.fr/geocodage` ; l'ancien hôte `api-adresse.data.gouv.fr` est
+déprécié depuis le 31 janvier 2026 et coupait régulièrement) — seul envoi à un tiers, déclenché par l'utilisateur à chaque recherche et annoncé à
 côté du bouton — puis la circonscription est calculée dans le navigateur (point dans polygone, `assets/geo.js`) à partir
 de `data/circos/<dept>.json`. Ces fichiers sont tirés des « Contours géographiques des circonscriptions législatives »
 (data.gouv, juin 2024, contours généralisés) pour les seuls départements comptant une commune partagée ou une

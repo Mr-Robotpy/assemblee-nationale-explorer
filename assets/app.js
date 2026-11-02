@@ -845,11 +845,13 @@ function deputeParCirco(dept, circ) {
 }
 
 /* ---------------------------------------------------------------- « préciser avec mon adresse »
- * Communes et arrondissements partagés : l'adresse est géocodée par l'API Adresse de l'État (seul envoi à un tiers,
+ * Communes et arrondissements partagés : l'adresse est géocodée par l'API Adresse de l'État, servie par la
+ * Géoplateforme de l'IGN (data.geopf.fr ; l'ancien hôte api-adresse.data.gouv.fr est déprécié depuis le 31 janvier 2026)
+ * (seul envoi à un tiers,
  * annoncé à côté du bouton et sur la page de confidentialité, à chaque recherche), puis la circonscription est trouvée
  * dans le navigateur (data/circos/<dept>.json, assets/geo.js). « Me localiser » : position de l'appareil, aucun envoi.
  * L'adresse n'est ni stockée ni mise dans l'URL. */
-const API_ADRESSE = 'https://api-adresse.data.gouv.fr/search/';
+const API_ADRESSE = 'https://data.geopf.fr/geocodage/search';
 const LIMITE_PROCHE_M = 100;  // en deçà, le résultat est signalé comme incertain (contours généralisés à ~20 m)
 
 function addressBlock(r) {
@@ -870,7 +872,7 @@ function addressForm(box) {
             <button class="btn-primary whitespace-nowrap">Chercher</button>
         </div>
         <p class="text-[11px] text-slate-500 dark:text-slate-400"><i class="fa-solid fa-shield-halved mr-1"></i>En cliquant sur « Chercher », l'adresse saisie est
-            envoyée à l'<strong>API Adresse de l'État</strong> (api-adresse.data.gouv.fr) pour être localisée. Ce site ne la conserve pas et ne la transmet
+            envoyée à l'<strong>API Adresse de l'État</strong> (Géoplateforme de l'IGN, data.geopf.fr) pour être localisée. Ce site ne la conserve pas et ne la transmet
             à personne d'autre. <a class="underline" href="#/mentions">Confidentialité</a></p>
         <button type="button" data-geoloc class="text-xs text-blue-600 dark:text-blue-400 hover:underline">
             <i class="fa-solid fa-location-arrow mr-1"></i>Ou me localiser (calcul sur votre appareil, rien n'est envoyé)</button>
@@ -936,7 +938,7 @@ function globalAddressForm(i) {
             <button class="btn-primary whitespace-nowrap">Chercher par adresse</button>
         </div>
         <p class="text-[11px] text-slate-500 dark:text-slate-400"><i class="fa-solid fa-shield-halved mr-1"></i>En cliquant sur « Chercher par adresse », l'adresse
-            saisie est envoyée à l'<strong>API Adresse de l'État</strong> (api-adresse.data.gouv.fr) pour être localisée ; la circonscription est ensuite trouvée
+            saisie est envoyée à l'<strong>API Adresse de l'État</strong> (Géoplateforme de l'IGN, data.geopf.fr) pour être localisée ; la circonscription est ensuite trouvée
             sur votre appareil. Ce site ne conserve pas l'adresse. Sans envoi : utilisez la recherche par commune ou code postal. <a class="underline" href="#/mentions">Confidentialité</a></p>
         <div data-gaddr-result aria-live="polite" class="text-sm"></div>
     </form>`;
@@ -964,6 +966,17 @@ async function resolveAddress(q, out) {
     const row = rows.find((r) => r[1] === citycode);
     const orphan = !row && ((state.communes && state.communes.nonRattachees) || []).find((r) => r[1] === citycode);
     const dept = row ? row[3] : orphan ? orphan[3] : deptFromInsee(String(citycode || ''));
+    const { verdict, autreCommune } = window.ANGeo.assessGeocode(f.properties, q, !(row && row[4].length === 1));
+    if (verdict !== 'ok') {
+        out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">${verdict === 'commune'
+            ? `Seule la commune a été reconnue (${esc(city || label)}). ${row
+                ? `Elle compte plusieurs circonscriptions : indiquez le numéro et le nom de la voie,
+                   ou <a class="underline" href="#/recherche?q=${encodeURIComponent(citycode || city || '')}">voyez les députés de la commune</a>.`
+                : 'Sa circonscription n\'est connue qu\'à l\'adresse (commune créée ou modifiée depuis 2024) : indiquez le numéro et le nom de la voie.'}`
+            : `Adresse non reconnue avec certitude (correspondance la plus proche : « ${esc(label || '?')} »). Indiquez le numéro, la voie et la commune,
+               ou utilisez la recherche par commune. Wallis-et-Futuna et les adresses à l'étranger ne sont pas couverts par la recherche par adresse.`}</p>`;
+        return;
+    }
     let circ = null, dist = null, source = '';
     if (row && row[4].length === 1) {
         circ = row[4][0];
@@ -975,7 +988,9 @@ async function resolveAddress(q, out) {
             if (hit) { circ = hit.circo; dist = hit.distanceM; source = 'calcul à partir des contours de circonscription de 2024'; }
         } catch (e) { /* contours absents : message ci-dessous */ }
     }
-    const reconnue = `<p class="text-xs text-slate-500">Adresse reconnue : <strong class="text-slate-700 dark:text-slate-200">${esc(label || q)}</strong></p>`;
+    const reconnue = `<p class="text-xs text-slate-500">Adresse reconnue : <strong class="text-slate-700 dark:text-slate-200">${esc(label || q)}</strong></p>`
+        + (autreCommune ? `<p class="text-xs text-amber-800 dark:text-amber-200"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Ce n'est pas la commune
+            voulue ? Ajoutez la commune ou le code postal à votre saisie.</p>` : '');
     if (circ === null) {
         out.innerHTML = `<div class="mt-2 space-y-1">${reconnue}<p class="text-xs text-amber-700 dark:text-amber-300">Circonscription non déterminée pour cette adresse${city ? ` (${esc(city)})` : ''}.
             <a class="underline" href="#/recherche?q=${encodeURIComponent(citycode || city || '')}">Voir la commune</a> ou consultez votre carte électorale.</p></div>`;
@@ -1027,7 +1042,13 @@ function bindAddress() {
         out.innerHTML = '<p class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Recherche de l\'adresse…</p>';
         try {
             const f = await geocode(q, box);
-            if (!f) { out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">Adresse introuvable à ${esc(box.dataset.nom)}. Ajoutez le numéro et le nom de la voie.</p>`; return; }
+            const { verdict } = f ? window.ANGeo.assessGeocode(f.properties, q, true) : { verdict: 'incertain' };
+            if (verdict !== 'ok') {
+                out.innerHTML = `<p class="text-xs text-amber-700 dark:text-amber-300">${f && verdict === 'commune'
+                    ? `Seule la commune a été reconnue : indiquez le numéro et le nom de la voie à ${esc(box.dataset.nom)}.`
+                    : `Adresse introuvable à ${esc(box.dataset.nom)}${f ? ` (correspondance la plus proche, trop incertaine : « ${esc(f.properties.label)} »)` : ''}. Ajoutez le numéro et le nom de la voie.`}</p>`;
+                return;
+            }
             const [lon, lat] = f.geometry.coordinates;
             await locate(box, lon, lat, f.properties.label);
         } catch (err) {
