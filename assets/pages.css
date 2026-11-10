@@ -1,0 +1,67 @@
+/* Pages statiques (scripts/build_pages.py) : fiches lisibles sans JavaScript, indépendantes de Tailwind. */
+:root {
+    --fond: #f8fafc; --carte: #ffffff; --texte: #0f172a; --doux: #475569; --trait: #e2e8f0;
+    --lien: #1d4ed8; --accent: #2563eb; --accent-texte: #ffffff; --faite: #2563eb;
+}
+html.dark {
+    --fond: #0f172a; --carte: #1e293b; --texte: #f1f5f9; --doux: #cbd5e1; --trait: #334155;
+    --lien: #93c5fd; --accent: #3b82f6; --accent-texte: #0f172a; --faite: #3b82f6;
+    color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0; background: var(--fond); color: var(--texte);
+    font-family: Inter, system-ui, sans-serif; font-size: 16px; line-height: 1.55;
+}
+a { color: var(--lien); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.entete, main, footer { max-width: 56rem; margin: 0 auto; padding: 0 1rem; }
+.entete {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem;
+    padding-top: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--trait);
+}
+.marque { font-weight: 800; color: var(--texte); text-decoration: none; }
+.entete nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .9rem; }
+main { padding-top: 1.25rem; padding-bottom: 2.5rem; }
+.fil { font-size: .8rem; color: var(--doux); margin-bottom: 1.25rem; }
+.sur { margin: 0; font-size: .75rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--doux); }
+h1 { margin: .25rem 0 1rem; font-size: 1.75rem; line-height: 1.2; }
+h2 { margin: 2rem 0 .75rem; font-size: 1.15rem; }
+h2 small { font-weight: 400; color: var(--doux); }
+.chapo { color: var(--doux); }
+.badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.infos { margin: 0; display: grid; gap: .5rem; }
+.infos div { display: grid; grid-template-columns: minmax(9rem, 14rem) 1fr; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--trait); }
+.infos dt { color: var(--doux); font-size: .875rem; }
+.infos dd { margin: 0; }
+.stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; }
+.stats li { background: var(--carte); border: 1px solid var(--trait); border-radius: .75rem; padding: .75rem 1rem; display: flex; flex-direction: column; }
+.stats span, .stats small { font-size: .8rem; color: var(--doux); }
+.stats strong { font-size: 1.5rem; }
+.note { font-size: .8rem; color: var(--doux); }
+.defile { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+th, td { text-align: left; vertical-align: top; padding: .5rem .75rem .5rem 0; border-bottom: 1px solid var(--trait); }
+th { color: var(--doux); font-weight: 600; white-space: nowrap; }
+td:first-child { white-space: nowrap; }
+.liste { list-style: none; margin: 0; padding: 0; }
+.liste li { padding: .5rem 0; border-bottom: 1px solid var(--trait); }
+.liste small { display: block; color: var(--doux); font-size: .8rem; }
+@media (min-width: 40rem) { .colonnes { columns: 2; column-gap: 2rem; } .colonnes li { break-inside: avoid; } }
+.etapes { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: .25rem; text-align: center; font-size: .75rem; }
+.etapes li { padding: .4rem .2rem; border-radius: .375rem; background: var(--trait); color: var(--doux); }
+.etapes .faite { background: var(--faite); color: var(--accent-texte); font-weight: 600; }
+.chrono { list-style: none; margin: 0; padding: 0; }
+.chrono li { display: grid; grid-template-columns: 9rem 1fr; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--trait); font-size: .9rem; }
+.chrono time { color: var(--doux); }
+.chrono small { display: block; color: var(--doux); font-size: .75rem; }
+.prevu { font-size: .7rem; font-weight: 700; padding: .05rem .4rem; border-radius: 999px; border: 1px solid var(--trait); white-space: nowrap; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 2rem; }
+.bouton { display: inline-block; padding: .6rem 1rem; border-radius: .5rem; background: var(--accent); color: var(--accent-texte); font-weight: 600; text-decoration: none; }
+.bouton.secondaire { background: transparent; color: var(--lien); border: 1px solid var(--trait); }
+footer { padding-top: 1rem; padding-bottom: 2rem; border-top: 1px solid var(--trait); font-size: .75rem; color: var(--doux); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 30rem) {
+    .infos div, .chrono li { grid-template-columns: 1fr; gap: .1rem; }
+    h1 { font-size: 1.4rem; }
+}

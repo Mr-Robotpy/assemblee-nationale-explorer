@@ -98,8 +98,11 @@ jobs:
           npm run build:css
 
       - uses: actions/configure-pages@v5
+        id: pages
 
       - name: Préparation du site
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
           mkdir -p _site
           cp -r index.html assets data _site/
@@ -111,6 +114,10 @@ jobs:
           n=$(grep -cE '"assets/[a-z]+\.(css|js)"' _site/index.html)
           sed -i -E "s#\"(assets/[a-z]+\.(css|js))\"#\"\1?v=${v}\"#g" _site/index.html
           test "$n" -ge 3 && test "$(grep -c "?v=${v}" _site/index.html)" -eq "$n" || { echo "Versionnage des assets incomplet dans index.html"; exit 1; }
+          # Pages statiques (une par député et par dossier), plan du site et page 404 : dérivés des JSON à chaque
+          # déploiement, y compris quand la génération a échoué et que les données sont celles de la veille.
+          python scripts/build_pages.py --data data --out _site --base-url "${BASE_URL}" --version "${v}"
+          test -s _site/sitemap.xml && test -s _site/depute/index.html && test -s _site/dossier/index.html
 
       - uses: actions/upload-pages-artifact@v3
         with:

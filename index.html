@@ -354,6 +354,10 @@
                 une opinion politique, porte sur des données manifestement rendues publiques par les personnes concernées (article 9.2.e).</li>
                 <li><strong>Minimisation et durée</strong> : seuls les députés en exercice sont publiés ; à la fin d'un mandat, la fiche disparaît
                 à la mise à jour suivante. Les collaborateurs et suppléants ne sont pas repris.</li>
+                <li><strong>Moteurs de recherche</strong> : chaque député en exercice a une page (<a href="depute/">liste des députés</a>)
+                que les moteurs de recherche peuvent référencer. Elle se limite au mandat — groupe, circonscription, organes, votes lors
+                des scrutins publics, questions posées — et ne reprend ni la date et le lieu de naissance, ni la profession, ni les
+                coordonnées. Elle est supprimée à la fin du mandat ; son retrait des résultats d'un moteur dépend ensuite de celui-ci.</li>
                 <li><strong>Destinataires</strong> : toute personne consultant le site.</li>
             </ul>
 
@@ -418,7 +422,9 @@
 <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-xs text-slate-500 dark:text-slate-400">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-3">
         <p>Projet indépendant, non affilié à l'Assemblée nationale. Données : Assemblée nationale, <a class="underline" href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener">Licence Ouverte 2.0</a>.</p>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+            <a href="depute/" class="hover:underline">Liste des députés</a>
+            <a href="dossier/" class="hover:underline">Liste des dossiers</a>
             <a href="#/mentions" class="hover:underline">Mentions légales et confidentialité</a>
             <a href="https://data.assemblee-nationale.fr/" target="_blank" rel="noopener" class="hover:underline">Portail Open Data</a>
             <a href="https://github.com/mr-robotpy/assemblee-nationale-explorer" target="_blank" rel="noopener" class="hover:underline"><i class="fa-brands fa-github"></i> Code source</a>

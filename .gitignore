@@ -4,3 +4,8 @@ _site/
 __pycache__/
 *.pyc
 data/
+# pages statiques générées en local (scripts/build_pages.py --out .)
+/depute/
+/dossier/
+/sitemap.xml
+/404.html

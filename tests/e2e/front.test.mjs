@@ -22,7 +22,7 @@ before(async () => {
     execFileSync(process.env.PYTHON || 'python3', [path.join(ROOT, 'tests', 'e2e', 'make_site.py'), site], { stdio: 'inherit' });
     server = http.createServer((req, res) => {
         const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-        const file = path.join(site, rel === '/' ? 'index.html' : rel);
+        const file = path.join(site, rel.endsWith('/') ? rel + 'index.html' : rel);  // comme GitHub Pages
         if (!file.startsWith(site) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404).end(); return; }
         res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
         createReadStream(file).pipe(res);
@@ -222,6 +222,52 @@ test('bandeau : données de plus de 48 h et mise à jour partielle', async () =>
     ({ page, fin } = await ouvrir('', { meta: (m) => ({ ...m, generation: ilYA(5.2), echecs: ['scrutins'] }) }));
     await attendre(page, '#globalError', 'depuis 5 jours');
     assert.match(await page.locator('#globalError').innerText(), /section\(s\) scrutins non rafraîchie\(s\)/);
+    await fin();
+});
+
+test('pages statiques : lisibles sans JavaScript, reliées à l\'application', async () => {
+    // Sans JavaScript, comme un robot d'indexation : le contenu doit être dans le HTML.
+    const sansJs = await browser.newContext({ javaScriptEnabled: false, locale: 'fr-FR' });
+    const robot = await sansJs.newPage();
+    const tiers = [];
+    robot.on('request', (r) => { if (!r.url().startsWith(base)) tiers.push(r.url()); });
+    const reponse = await robot.goto(base + 'depute/PA841495.html');
+    assert.equal(reponse.status(), 200);
+    assert.match(await robot.title(), /^Maxime Amblard, député RN · Meuse \(55\) · 1re circonscription/);
+    assert.equal(await robot.locator('h1').innerText(), 'Maxime Amblard');
+    assert.match(await robot.locator('main').innerText(), /Participation aux scrutins publics\s+100,0 %/);
+    assert.match(await robot.locator('link[rel="canonical"]').getAttribute('href'), /\/depute\/PA841495\.html$/);
+    await robot.goto(base + 'depute/');
+    assert.equal(await robot.locator('main li a').count(), 6);
+    await robot.goto(base + 'dossier/');
+    await robot.locator('main li a', { hasText: 'Approbation des comptes' }).click();
+    assert.equal(await robot.locator('h1').innerText(), 'Approbation des comptes de la sécurité sociale pour l\'année 2023');
+    assert.deepEqual(tiers, []);
+    await sansJs.close();
+
+    // Avec JavaScript : la page statique mène à la fiche interactive, et l'application aux listes statiques.
+    const { page, fin } = await ouvrir();
+    await page.goto(base + 'dossier/DLR5L17N50173.html');
+    await page.getByRole('link', { name: 'Ouvrir la fiche interactive' }).click();
+    await attendre(page, '#detailContent', 'Approbation des comptes de la sécurité sociale');
+    assert.equal(new URL(page.url()).hash, '#/dossier/DLR5L17N50173');
+    await page.goto(base);
+    await page.locator('footer a[href="depute/"]').click();
+    await page.locator('h1', { hasText: 'Les 6 députés en exercice' }).waitFor();
+    await page.locator('main li a', { hasText: 'Bernalicis' }).click();
+    await page.locator('h1', { hasText: 'Ugo Bernalicis' }).waitFor();
+    await fin();
+});
+
+test('thème sombre : repris par les pages statiques', async () => {
+    const { page, fin } = await ouvrir();
+    await page.goto(base + 'depute/PA841495.html');
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('dark')), false);
+    await page.goto(base);
+    await page.locator('#headerUpdated').filter({ hasText: 'Données mises à jour' }).waitFor();
+    await page.locator('#themeToggle').click();
+    await page.goto(base + 'depute/PA841495.html');
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('dark')), true);
     await fin();
 });
 
