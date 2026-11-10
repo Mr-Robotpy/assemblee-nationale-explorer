@@ -657,6 +657,9 @@ class VolumesTest(unittest.TestCase):
             bd.controle_volume("scrutins", 0, 9491)
         with self.assertRaises(bd.VolumeAnormal):
             bd.controle_volume("députés", 200, plancher=500)
+        bd.controle_volume("députés", 560, 574, baisse_max=bd.BAISSE_MAX_DEPUTES)  # -2 % : vacances ordinaires
+        with self.assertRaises(bd.VolumeAnormal):
+            bd.controle_volume("députés", 540, 574, baisse_max=bd.BAISSE_MAX_DEPUTES)  # -6 %
         self.assertEqual(bd._nb_dossiers({"PJL": 3, "PPL": 5, "PJL_promulgues": 2}), 8)
         self.assertIsNone(bd._nb_dossiers(None))
 

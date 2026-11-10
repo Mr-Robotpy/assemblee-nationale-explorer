@@ -1425,6 +1425,7 @@ def fetch_sources(names: Iterable[str], cache: Path, source_dir: Path | None) ->
 # Une archive tronquée mais valide (200 députés, 1 000 scrutins) se traite sans erreur : sans contrôle, elle
 # remplacerait les données de la veille sur la branche `data`, réécrite en un seul commit (pas de retour arrière).
 MIN_DEPUTES = 500  # 577 sièges ; les vacances (ministres, partielles) n'en retirent jamais autant
+BAISSE_MAX_DEPUTES = 0.05  # ≈ 29 sièges d'un jour à l'autre : aucune vacance réelle n'atteint ce nombre
 BAISSE_MAX = 0.10  # au sein d'une législature, scrutins, dossiers et questions ne font que s'accumuler
 
 
@@ -1489,10 +1490,10 @@ def main(argv: list[str] | None = None) -> int:
     # Volumes du passage précédent ; ignorés après un changement de législature (les compteurs repartent de zéro).
     avant = meta["sections"] if meta.get("legislature") == LEGISLATURE else {}
 
-    def volume(nom: str, n: int, precedent: Any = None, plancher: int = 0) -> None:
+    def volume(nom: str, n: int, precedent: Any = None, plancher: int = 0, baisse_max: float = BAISSE_MAX) -> None:
         if args.force_volumes:
             return
-        controle_volume(nom, n, precedent, plancher)
+        controle_volume(nom, n, precedent, plancher, baisse_max)
 
     ref = Referentiel()
     if "amo20" in src:
@@ -1506,7 +1507,7 @@ def main(argv: list[str] | None = None) -> int:
     summaries, details, groupes = build_deputes(ref)
     LOG.info("%d députés, %d groupes", len(summaries), len(groupes))
     try:
-        volume("députés", len(summaries), (avant.get("deputes") or {}).get("total"), args.min_deputes)
+        volume("députés", len(summaries), (avant.get("deputes") or {}).get("total"), args.min_deputes, BAISSE_MAX_DEPUTES)
     except VolumeAnormal as e:
         # Toutes les sections s'appuient sur l'annuaire : rien n'est écrit, les données précédentes restent en place.
         LOG.error("%s. Rien n'est publié (--force-volumes pour passer outre).", e)

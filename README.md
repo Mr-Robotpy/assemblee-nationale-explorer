@@ -167,7 +167,7 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
   d'échec. Sur le site, un bandeau apparaît quand les données ont plus de 48 h.
 - **Volumes** (`controle_volume`) : une archive tronquée mais valide ne remplace pas les données de la veille. Sous
-  500 députés (`--min-deputes`), ou 10 % de députés en moins que la veille, rien n'est publié. Une section (scrutins,
+  500 députés (`--min-deputes`), ou 5 % de députés en moins que la veille, rien n'est publié. Une section (scrutins,
   dossiers, chaque type de question) qui perd plus de 10 % par rapport au passage précédent n'est pas publiée : la
   section de la veille reste en place et figure dans `echecs`. La comparaison est ignorée après un changement de
   législature. Si la baisse est réelle (vérifiée à la source) : **Run workflow → « forcer_volumes »**, ou
