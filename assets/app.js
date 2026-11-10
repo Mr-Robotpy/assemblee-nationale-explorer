@@ -343,7 +343,7 @@ async function init() {
         if (/^404/.test(e.message)) {
             showGlobalError(`Les données n'ont pas encore été générées. Lancez le workflow « Mise à jour des données » dans l'onglet Actions du dépôt, ou en local : <code>python scripts/build_data.py</code>.`);
         } else {
-            showGlobalError(`Données indisponibles (${esc(e.message)}) : problème de connexion ou serveur momentanément injoignable. <button class="underline font-semibold" onclick="location.reload()">Réessayer</button>`);
+            showGlobalError(`Données indisponibles (${esc(e.message)}) : problème de connexion ou serveur momentanément injoignable. <button class="underline font-semibold" data-reload>Réessayer</button>`);
         }
         markReady();
         return;
@@ -457,6 +457,7 @@ function bindFilters() {
             if (ok) { label.textContent = 'Lien copié'; setTimeout(() => { label.textContent = 'Copier le lien'; }, 1800); } else { window.prompt('Lien de cette recherche :', url); }
             return;
         }
+        if (e.target.closest('[data-reload]')) { location.reload(); return; }
         const b = e.target.closest('[data-retry]');
         if (b && !b.disabled) retry(b.dataset.retry.split(',').filter(Boolean));
     });

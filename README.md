@@ -190,12 +190,18 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
 
 ## Surveillance et garde-fous
 
-- **Tests sur les pull requests** (`.github/workflows/ci.yml`) : tests Python et Node, compilation CSS, tests du front
-  dans un navigateur, sans téléchargement ni publication.
+- **Tests sur les pull requests** (`.github/workflows/ci.yml`) : lint Python (`ruff`, règles dans `ruff.toml`), tests
+  Python et Node, compilation CSS, tests du front dans un navigateur, sans téléchargement ni publication.
 - **Tests de navigateur** (`tests/e2e/front.test.mjs`, Playwright) : `tests/e2e/make_site.py` construit un site complet
   à partir des extraits de `tests/fixtures` avec la chaîne de production, puis Chromium vérifie les listes, les filtres
-  dans l'URL, les fiches, les suivis, la recherche, les bandeaux et les pages statiques (JavaScript désactivé). Chaque test échoue aussi sur une erreur JavaScript,
+  dans l'URL, les fiches, les suivis, la recherche, les bandeaux et les pages statiques (JavaScript désactivé).
+  La recherche par commune et par adresse y est testée sur deux communes fictives de la Meuse (une entière, une
+  partagée entre deux circonscriptions) et un géocodeur simulé : calcul dans les contours, confirmation d'une voie
+  différente de la saisie, réponse douteuse refusée, service en panne, « Me localiser ». Aucun test ne sort sur le réseau. Chaque test échoue aussi sur une erreur JavaScript,
   un fichier manquant ou une requête vers un autre site.
+- **Code et données séparés** : un push sur `main` qui ne modifie pas `scripts/build_data.py` redéploie le code avec
+  les données déjà publiées, sans retélécharger les archives. Le passage quotidien et le lancement manuel régénèrent
+  toujours ; dans le doute (aucune donnée publiée, commit précédent inconnu), un push régénère aussi.
 - **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
   d'échec. Sur le site, un bandeau apparaît quand les données ont plus de 48 h.
@@ -205,6 +211,16 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
   section de la veille reste en place et figure dans `echecs`. La comparaison est ignorée après un changement de
   législature. Si la baisse est réelle (vérifiée à la source) : **Run workflow → « forcer_volumes »**, ou
   `--force-volumes` / `FORCE_VOLUMES=1` en local.
+
+## Sécurité du contenu
+
+L'application et les pages statiques portent une politique de sécurité de contenu (balise `<meta>`, GitHub Pages ne
+permettant pas d'en-tête) : seuls les scripts du site s'exécutent, et la seule connexion vers un tiers est l'API
+Adresse. Elle double l'échappement des données : un script qui passerait malgré tout dans la page ne s'exécuterait
+pas (testé dans un navigateur). Conséquences pour le code : aucun `<script>` en ligne (le thème est dans
+`assets/theme.js`), aucun `onclick="…"` dans le HTML (écouteurs sur des attributs `data-…`). Les attributs `style`
+(couleurs des groupes) restent autorisés. Limite : une balise `<meta>` ne peut pas interdire l'affichage du site dans
+un cadre d'un autre site (`frame-ancestors`).
 
 ## Ressources tierces
 
@@ -230,6 +246,7 @@ exercice des droits par courriel (jeremygforia@gmail.com, contact non public, r�
 python scripts/build_data.py          # télécharge ~90 Mo d'archives et génère data/ (quelques minutes)
 python -m http.server 8000            # puis http://localhost:8000
 python -m unittest discover -s tests  # tests hors ligne sur des extraits réels de l'Open Data
+ruff check scripts tests              # lint Python (pip install ruff)
 node --test tests/*.test.mjs           # tests de géométrie (recherche par adresse)
 npm ci && npx playwright install chromium && npm run test:e2e   # tests du front dans un navigateur
 npm ci && npm run build:css           # uniquement si vous modifiez les classes Tailwind

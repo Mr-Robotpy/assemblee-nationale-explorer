@@ -116,14 +116,19 @@ class SiteTest(unittest.TestCase):
         self.assertIn("Dossier sur le site du Sénat", page)
 
     def test_aucune_ressource_tierce(self):
-        """Comme l'application : ni script, ni feuille de style, ni image d'un autre site ; un seul script, le thème."""
+        """Comme l'application : ni script, ni feuille de style, ni image d'un autre site ; aucun script en ligne."""
         for chemin in ("depute/PA841495.html", "dossier/DLR5L17N50173.html", "depute/index.html", "dossier/index.html"):
             s = structure(self.lire(chemin))
             for rel, url in s.ressources:
                 if rel != "canonical":
                     self.assertFalse(re.match(r"(https?:)?//", url), f"{chemin} charge {url}")
-            self.assertEqual([c for g, c in s.scripts if g == "js"], [bp.THEME_JS])
+            self.assertEqual([c for g, c in s.scripts if g == "js"], [""])  # un seul script, externe : le thème
             self.assertNotIn("img", s.balises)
+            page = self.lire(chemin)
+            self.assertIn(f'<meta http-equiv="Content-Security-Policy" content="{bp.CSP}">', page)
+            self.assertLess(page.index("Content-Security-Policy"), page.index("<script"))  # avant tout script
+            self.assertIn("script-src 'self';", bp.CSP)
+            self.assertTrue((ROOT / "assets" / "theme.js").is_file())
 
     def test_listes_et_liens_internes(self):
         """Chaque page est reliée au site : listes complètes, et aucun lien interne vers un fichier absent."""
@@ -226,7 +231,7 @@ class EchappementTest(unittest.TestCase):
 
     def _sain(self, page: str):
         s = structure(page)
-        self.assertEqual([c for g, c in s.scripts if g == "js"], [bp.THEME_JS])
+        self.assertEqual([c for g, c in s.scripts if g == "js"], [""])  # un seul script, externe : le thème
         self.assertNotIn("img", s.balises)
         self.assertNotIn("b", s.balises)
         self.assertEqual(s.balises.count("title"), 1)

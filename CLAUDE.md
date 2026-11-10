@@ -10,6 +10,7 @@
 ## Vérifications avant de pousser
 
 ```bash
+ruff check scripts tests               # lint Python
 python -m unittest discover -s tests   # pipeline et contrôles statiques du front
 node --test tests/*.test.mjs           # géométrie
 npm run test:e2e                       # front dans un navigateur (après npm ci)
@@ -23,3 +24,5 @@ npm run test:e2e                       # front dans un navigateur (après npm ci
 - Toute donnée insérée dans une page statique passe par `e()` (échappement) ; les liens par `lien()` (http(s) seulement).
 - La page statique d'un député se limite à son mandat : ni naissance, ni profession, ni coordonnées.
 - Les données générées vivent sur la branche `data`, jamais sur `main`.
+- Politique de sécurité de contenu `script-src 'self'` : ni `<script>` en ligne, ni `onclick="…"` dans le HTML produit
+  (écouteurs sur des attributs `data-…`).
