@@ -1470,6 +1470,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="exclure les autres procédures (résolutions, commissions d'enquête…), incluses par défaut")
     ap.add_argument("--no-communes", action="store_true", help="ne pas construire la table commune → circonscription")
     ap.add_argument("--force-communes", action="store_true", help="reconstruire la table des communes même récente")
+    ap.add_argument("--min-communes", type=int, default=30000,
+                    help="nombre de communes sous lequel la table est refusée (à abaisser pour un jeu d'essai)")
     ap.add_argument("--force-circos", action="store_true", help="republier les contours de circonscriptions même récents")
     ap.add_argument("--min-deputes", type=int, default=int(os.environ.get("MIN_DEPUTES", MIN_DEPUTES)),
                     help="nombre de députés sous lequel rien n'est publié")
@@ -1605,7 +1607,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_communes:
         try:
             keys = {(d["numDepartement"], d["circo"]) for d in summaries}
-            c_meta = update_communes(out, args.cache, args.source_dir, keys, meta, now, args.force_communes)
+            c_meta = update_communes(out, args.cache, args.source_dir, keys, meta, now, args.force_communes,
+                                     min_communes=args.min_communes)
             if c_meta:
                 meta["sections"]["communes"] = c_meta
         except Exception:

@@ -194,7 +194,10 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
   dans un navigateur, sans téléchargement ni publication.
 - **Tests de navigateur** (`tests/e2e/front.test.mjs`, Playwright) : `tests/e2e/make_site.py` construit un site complet
   à partir des extraits de `tests/fixtures` avec la chaîne de production, puis Chromium vérifie les listes, les filtres
-  dans l'URL, les fiches, les suivis, la recherche, les bandeaux et les pages statiques (JavaScript désactivé). Chaque test échoue aussi sur une erreur JavaScript,
+  dans l'URL, les fiches, les suivis, la recherche, les bandeaux et les pages statiques (JavaScript désactivé).
+  La recherche par commune et par adresse y est testée sur deux communes fictives de la Meuse (une entière, une
+  partagée entre deux circonscriptions) et un géocodeur simulé : calcul dans les contours, confirmation d'une voie
+  différente de la saisie, réponse douteuse refusée, service en panne, « Me localiser ». Aucun test ne sort sur le réseau. Chaque test échoue aussi sur une erreur JavaScript,
   un fichier manquant ou une requête vers un autre site.
 - **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel

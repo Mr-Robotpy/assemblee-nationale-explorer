@@ -12,8 +12,8 @@ import { chromium } from 'playwright';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2' };
-// Le site de test est construit sans réseau, donc sans table des communes : seule absence admise.
-const ABSENCES_ADMISES = ['/data/communes.json'];
+// Seul tiers admis : le géocodeur de l'État, appelé à la demande de l'utilisateur. Toujours simulé dans les tests.
+const GEOCODEUR = 'https://data.geopf.fr/geocodage/search';
 
 let site, server, browser, base;
 
@@ -39,16 +39,25 @@ after(async () => {
 });
 
 /** Ouvre le site dans un contexte neuf (localStorage vide) et surveille erreurs et requêtes pendant tout le test. */
-async function ouvrir(hash = '', { meta } = {}) {
-    const context = await browser.newContext({ locale: 'fr-FR' });
+async function ouvrir(hash = '', { meta, geocodeur, position } = {}) {
+    const context = await browser.newContext({ locale: 'fr-FR', ...(position ? { geolocation: position, permissions: ['geolocation'] } : {}) });
     const page = await context.newPage();
     const erreurs = [];
     const tiers = [];
     page.on('pageerror', (e) => erreurs.push(e.message));
-    page.on('request', (r) => { if (!r.url().startsWith(base) && !r.url().startsWith('data:')) tiers.push(r.url()); });
+    const appels = [];  // requêtes envoyées au géocodeur (paramètres)
+    page.on('request', (r) => {
+        if (r.url().startsWith(GEOCODEUR)) appels.push(Object.fromEntries(new URL(r.url()).searchParams));
+        else if (!r.url().startsWith(base) && !r.url().startsWith('data:')) tiers.push(r.url());
+    });
     page.on('response', (r) => {
-        const chemin = new URL(r.url()).pathname;
-        if (r.status() >= 400 && !ABSENCES_ADMISES.includes(chemin)) erreurs.push(`${r.status()} ${chemin}`);
+        if (r.status() >= 400 && r.url().startsWith(base)) erreurs.push(`${r.status()} ${new URL(r.url()).pathname}`);
+    });
+    // Sans simulation demandée, tout appel au géocodeur échoue : aucun test ne sort sur le réseau.
+    await page.route(GEOCODEUR + '**', async (route) => {
+        const rep = geocodeur ? geocodeur(Object.fromEntries(new URL(route.request().url()).searchParams)) : 599;
+        if (typeof rep === 'number') await route.fulfill({ status: rep, body: 'indisponible' });
+        else await route.fulfill({ json: { type: 'FeatureCollection', features: rep }, headers: { 'access-control-allow-origin': '*' } });
     });
     if (meta) {
         await page.route('**/data/meta.json', async (route) => {
@@ -63,8 +72,19 @@ async function ouvrir(hash = '', { meta } = {}) {
         assert.deepEqual(tiers, [], 'requêtes vers un autre site');
         await context.close();
     };
-    return { page, fin };
+    return { page, fin, appels };
 }
+
+/** Réponse du géocodeur : une adresse au numéro (par défaut) dans une commune du jeu d'essai. */
+function adresse({ numero = '12', voie = 'Rue de la Paix', ville = 'Bourg-Partagé', insee = '55901', cp = '55100', lon, lat = 49.16,
+    score = 0.95, type = 'housenumber' } = {}) {
+    const name = type === 'municipality' ? ville : `${numero} ${voie}`;
+    return { type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: { label: type === 'municipality' ? `${cp} ${ville}` : `${name} ${cp} ${ville}`, score, type, name, housenumber: numero,
+            street: voie, postcode: cp, citycode: insee, city: ville } };
+}
+// Les deux circonscriptions du jeu d'essai sont séparées par le méridien 5,40° (tests/e2e/make_site.py).
+const DANS_LA_1RE = 5.38, DANS_LA_2E = 5.42, PRES_DE_LA_LIMITE = 5.3996;
 
 const attendre = (page, sel, texte) => page.locator(sel).filter({ hasText: texte }).first().waitFor();
 const nombre = (page, sel) => page.locator(sel).count();
@@ -222,6 +242,141 @@ test('bandeau : données de plus de 48 h et mise à jour partielle', async () =>
     ({ page, fin } = await ouvrir('', { meta: (m) => ({ ...m, generation: ilYA(5.2), echecs: ['scrutins'] }) }));
     await attendre(page, '#globalError', 'depuis 5 jours');
     assert.match(await page.locator('#globalError').innerText(), /section\(s\) scrutins non rafraîchie\(s\)/);
+    await fin();
+});
+
+test('député par commune : nom ou code postal, commune entière ou partagée', async () => {
+    const { page, fin, appels } = await ouvrir('#/recherche?q=Testville');
+    await attendre(page, '#searchResults', 'Votre député par commune');
+    const bloc = page.locator('#searchResults .card', { hasText: 'Votre député par commune' });
+    assert.match(await bloc.innerText(), /Testville-sur-Meuse\s*· Meuse \(55\) · 55000/);
+    assert.match(await bloc.innerText(), /Maxime Amblard[\s\S]*1re circonscription/);
+    assert.equal(await bloc.locator('[data-addr-open]').count(), 0);  // une seule circonscription : rien à préciser
+
+    await page.goto(base + '#/recherche?q=55100');
+    await attendre(page, '#searchResults', 'Bourg-Partagé');
+    const partage = await page.locator('#searchResults .card', { hasText: 'Votre député par commune' }).innerText();
+    assert.match(partage, /Commune partagée entre 2 circonscriptions/);
+    assert.match(partage, /Maxime Amblard/);
+    assert.match(partage, /2e circonscription : siège vacant ou député introuvable/);
+    assert.deepEqual(appels, []);  // la recherche par commune n'envoie rien au géocodeur
+    await fin();
+});
+
+test('préciser avec son adresse : la circonscription est calculée dans le navigateur', async () => {
+    const { page, fin, appels } = await ouvrir('#/recherche?q=Bourg-Partagé', { geocodeur: () => [adresse({ lon: DANS_LA_1RE })] });
+    await attendre(page, '#searchResults', 'Commune partagée');
+    await page.locator('[data-addr-open]').click();
+    assert.match(await page.locator('[data-addr-form]').innerText(), /envoyée à l'API Adresse de l'État/);  // annoncé avant l'envoi
+    assert.deepEqual(appels, []);  // ouvrir le formulaire n'envoie rien
+    await page.locator('[data-addr-form] input').fill('12 rue de la Paix');
+    await page.locator('[data-addr-form] button', { hasText: 'Chercher' }).click();
+    await attendre(page, '[data-addr-result]', '1re circonscription');
+    const resultat = await page.locator('[data-addr-result]').innerText();
+    assert.match(resultat, /Adresse reconnue : 12 Rue de la Paix 55100 Bourg-Partagé/);
+    assert.match(resultat, /1re circonscription — Maxime Amblard/);
+    assert.doesNotMatch(resultat, /d'une limite/);
+    assert.equal(appels.length, 1);
+    assert.equal(appels[0].q, '12 rue de la Paix');
+    assert.equal(appels[0].citycode, '55901');  // recherche restreinte à la commune choisie
+    assert.equal(new URL(page.url()).hash, '#/recherche?q=Bourg-Partag%C3%A9');  // l'adresse ne va pas dans l'URL
+    assert.doesNotMatch(JSON.stringify(await page.evaluate(() => ({ ...localStorage }))), /Paix/);  // ni dans le stockage
+    await fin();
+});
+
+test('préciser avec son adresse : autre circonscription, et avertissement près d\'une limite', async () => {
+    let lon = DANS_LA_2E;
+    const { page, fin } = await ouvrir('#/recherche?q=55100', { geocodeur: () => [adresse({ lon })] });
+    await attendre(page, '#searchResults', 'Commune partagée');
+    await page.locator('[data-addr-open]').click();
+    const chercher = async () => {
+        await page.locator('[data-addr-form] input').fill('12 rue de la Paix');
+        await page.locator('[data-addr-form] button', { hasText: 'Chercher' }).click();
+    };
+    await chercher();
+    await attendre(page, '[data-addr-result]', '2e circonscription');
+    assert.doesNotMatch(await page.locator('[data-addr-result]').innerText(), /Maxime Amblard/);
+
+    lon = PRES_DE_LA_LIMITE;  // à une trentaine de mètres de la 2e
+    await chercher();
+    await attendre(page, '[data-addr-result]', 'd\'une limite de circonscription');
+    assert.match(await page.locator('[data-addr-result]').innerText(), /1re circonscription — Maxime Amblard/);
+    await fin();
+});
+
+test('adresse : aucun député affiché sans confirmation quand la voie trouvée n\'est pas celle saisie', async () => {
+    // Le géocodeur renvoie toujours « la plus proche » : « rue Victor Hugo » devient « Rue Victor Lagrange ».
+    const { page, fin } = await ouvrir('#/recherche?q=55100', {
+        geocodeur: () => [adresse({ numero: '8', voie: 'Rue Victor Lagrange', lon: DANS_LA_1RE })] });
+    await attendre(page, '#searchResults', 'Commune partagée');
+    await page.locator('[data-addr-open]').click();
+    await page.locator('[data-addr-form] input').fill('8 rue Victor Hugo');
+    await page.locator('[data-addr-form] button', { hasText: 'Chercher' }).click();
+    await attendre(page, '[data-addr-result]', 'Confirmez votre adresse');
+    assert.doesNotMatch(await page.locator('[data-addr-result]').innerText(), /circonscription —/);
+    await page.locator('[data-addr-result] [data-pick]').click();
+    await attendre(page, '[data-addr-result]', '1re circonscription — Maxime Amblard');
+    await fin();
+});
+
+test('adresse : réponse douteuse refusée, commune seule insuffisante, service en panne signalé', async () => {
+    let reponse = [adresse({ lon: DANS_LA_1RE, score: 0.3 })];
+    const { page, fin } = await ouvrir('#/recherche?q=55100', { geocodeur: () => reponse });
+    await attendre(page, '#searchResults', 'Commune partagée');
+    await page.locator('[data-addr-open]').click();
+    const chercher = async (saisie) => {
+        await page.locator('[data-addr-form] input').fill(saisie);
+        await page.locator('[data-addr-form] button', { hasText: 'Chercher' }).click();
+    };
+    await chercher('12 rue de la Paix');
+    await attendre(page, '[data-addr-result]', 'Aucune adresse « 12 rue de la Paix » trouvée à Bourg-Partagé');
+
+    reponse = [adresse({ type: 'municipality', lon: DANS_LA_1RE })];  // seul le centre de la commune est reconnu
+    await chercher('Bourg-Partagé');
+    await attendre(page, '[data-addr-result]', 'Seule la commune a été reconnue');
+
+    reponse = 503;
+    await chercher('12 rue de la Paix');
+    await attendre(page, '[data-addr-result]', 'Service de localisation indisponible');
+    assert.doesNotMatch(await page.locator('[data-addr-result]').innerText(), /circonscription —/);
+    await fin();
+});
+
+test('trouver mon député par adresse : commune entière sans calcul, commune partagée par les contours', async () => {
+    let reponse = [adresse({ numero: '5', voie: 'Rue du Test', ville: 'Testville-sur-Meuse', insee: '55900', cp: '55000', lon: 5.0 })];
+    const { page, fin, appels } = await ouvrir('#/deputes', { geocodeur: () => reponse });
+    const form = page.locator('#tab-deputes [data-gaddr-form]');
+    const chercher = async (saisie) => {
+        await form.locator('input').fill(saisie);
+        await form.locator('button', { hasText: 'Chercher par adresse' }).click();
+    };
+    await chercher('5 rue du Test, Testville-sur-Meuse');
+    await attendre(page, '#tab-deputes [data-gaddr-result]', 'Maxime Amblard');
+    let resultat = await form.locator('[data-gaddr-result]').innerText();
+    assert.match(resultat, /Adresse reconnue : 5 Rue du Test 55000 Testville-sur-Meuse/);
+    assert.match(resultat, /commune entièrement comprise dans cette circonscription/);
+    assert.equal(appels[0].q, '5 rue du Test, Testville-sur-Meuse');
+    assert.equal(appels[0].citycode, undefined);
+
+    reponse = [adresse({ lon: DANS_LA_2E })];
+    await chercher('12 rue de la Paix, Bourg-Partagé');
+    await attendre(page, '#tab-deputes [data-gaddr-result]', '2e circonscription (55) : siège vacant');
+    resultat = await form.locator('[data-gaddr-result]').innerText();
+    assert.match(resultat, /calcul à partir des contours de circonscription de 2024/);
+
+    reponse = [];
+    await chercher('99 rue Inexistante, Nulle-Part');
+    await attendre(page, '#tab-deputes [data-gaddr-result]', 'Adresse introuvable');
+    await fin();
+});
+
+test('me localiser : position de l\'appareil, aucun envoi', async () => {
+    const { page, fin, appels } = await ouvrir('#/recherche?q=55100', { position: { longitude: DANS_LA_1RE, latitude: 49.16 } });
+    await attendre(page, '#searchResults', 'Commune partagée');
+    await page.locator('[data-addr-open]').click();
+    await page.locator('[data-geoloc]').click();
+    await attendre(page, '[data-addr-result]', '1re circonscription — Maxime Amblard');
+    assert.deepEqual(appels, []);
     await fin();
 });
 
