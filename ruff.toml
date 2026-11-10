@@ -1,0 +1,9 @@
+# Lint Python (scripts et tests) : erreurs réelles (pyflakes : import inutile, nom indéfini, variable inutilisée…)
+# et style de base (pycodestyle). Règles choisies explicitement : le jeu par défaut varie d'une version à l'autre.
+line-length = 160
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W"]
+# Conventions du code existant, non modifiées : « l » pour une ligne de table, lambda nommée et « a(); b() » dans les tests.
+ignore = ["E741", "E731", "E702"]

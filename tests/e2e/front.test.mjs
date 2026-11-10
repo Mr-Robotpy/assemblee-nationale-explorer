@@ -46,6 +46,8 @@ async function ouvrir(hash = '', { meta, geocodeur, position } = {}) {
     const tiers = [];
     page.on('pageerror', (e) => erreurs.push(e.message));
     const appels = [];  // requêtes envoyées au géocodeur (paramètres)
+    const bloques = [];  // refus de la politique de sécurité de contenu
+    page.on('console', (m) => { if (/Content Security Policy/i.test(m.text())) bloques.push(m.text()); });
     page.on('request', (r) => {
         if (r.url().startsWith(GEOCODEUR)) appels.push(Object.fromEntries(new URL(r.url()).searchParams));
         else if (!r.url().startsWith(base) && !r.url().startsWith('data:')) tiers.push(r.url());
@@ -67,8 +69,9 @@ async function ouvrir(hash = '', { meta, geocodeur, position } = {}) {
     }
     await page.goto(base + hash);
     await page.locator('#headerUpdated').filter({ hasText: 'Données mises à jour' }).waitFor();
-    const fin = async () => {
+    const fin = async ({ blocagesAttendus = 0 } = {}) => {
         assert.deepEqual(erreurs, [], 'erreurs JavaScript ou fichiers manquants');
+        assert.equal(bloques.length, blocagesAttendus, `politique de sécurité de contenu : ${bloques.join(' | ')}`);
         assert.deepEqual(tiers, [], 'requêtes vers un autre site');
         await context.close();
     };
@@ -97,6 +100,8 @@ test('accueil : chiffres clés, derniers scrutins, aucun bandeau', async () => {
     await attendre(page, '#dashScrutins', 'Scrutin n°4003');
     assert.equal(await visible(page, '#globalError'), false);
     assert.equal(await visible(page, '#tab-dashboard'), true);
+    // Chart.js est chargé en différé : les trois graphiques doivent tout de même être tracés.
+    await page.waitForFunction(() => ['chartGroups', 'chartGender', 'chartMinisteres'].every((id) => window.Chart && window.Chart.getChart(id)));
     await fin();
 });
 
@@ -412,6 +417,29 @@ test('pages statiques : lisibles sans JavaScript, reliées à l\'application', a
     await page.locator('main li a', { hasText: 'Bernalicis' }).click();
     await page.locator('h1', { hasText: 'Ugo Bernalicis' }).waitFor();
     await fin();
+});
+
+test('politique de sécurité de contenu : un script injecté dans la page ne s\'exécute pas', async () => {
+    const { page, fin } = await ouvrir();
+    await attendre(page, '#kpis', 'Députés en exercice');
+    // Ce qu'obtiendrait une donnée hostile passée à travers l'échappement : un gestionnaire en ligne dans le HTML.
+    const execute = await page.evaluate(() => {
+        const hote = document.createElement('div');
+        hote.innerHTML = '<button onclick="window.__injecte = true">piège</button>';
+        document.body.appendChild(hote);
+        hote.firstChild.click();
+        return window.__injecte === true;
+    });
+    assert.equal(execute, false);
+    await page.goto(base + 'depute/PA841495.html');
+    assert.equal(await page.evaluate(() => {
+        const hote = document.createElement('div');
+        hote.innerHTML = '<button onclick="window.__injecte = true">piège</button>';
+        document.body.appendChild(hote);
+        hote.firstChild.click();
+        return window.__injecte === true;
+    }), false);
+    await fin({ blocagesAttendus: 2 });
 });
 
 test('thème sombre : repris par les pages statiques', async () => {

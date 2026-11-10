@@ -34,6 +34,40 @@ class VendorTest(unittest.TestCase):
         self.assertIn("CC BY 4.0", fa)  # attribution des icônes : en-tête conservé
 
 
+class SecuriteContenuTest(unittest.TestCase):
+    """La politique de sécurité de contenu n'autorise que les scripts du site : rien en ligne ne doit en dépendre."""
+
+    APP = (ROOT / "assets" / "app.js").read_text(encoding="utf-8")
+
+    def test_politique(self):
+        m = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)">', INDEX)
+        self.assertTrue(m, "balise Content-Security-Policy absente")
+        regles = dict(r.strip().split(" ", 1) for r in m.group(1).split(";"))
+        self.assertEqual(regles["script-src"], "'self'")
+        self.assertEqual(regles["object-src"], "'none'")
+        # Seul tiers joignable : l'API Adresse, à la demande de l'utilisateur.
+        self.assertEqual(regles["connect-src"], "'self' https://data.geopf.fr")
+        self.assertIn("https://data.geopf.fr/", self.APP)
+        self.assertLess(m.start(), INDEX.index("<script"))  # déclarée avant tout script
+
+    def test_aucun_script_en_ligne(self):
+        for attrs, corps in re.findall(r"<script([^>]*)>(.*?)</script>", INDEX, flags=re.S):
+            self.assertIn("src=", attrs)
+            self.assertEqual(corps.strip(), "")
+
+    def test_aucun_gestionnaire_en_ligne(self):
+        """« onclick="…" » serait bloqué par la politique : les clics passent par des écouteurs (data-…)."""
+        motif = r"<[a-z][^<>]*\son[a-z]+\s*="
+        self.assertEqual(re.findall(motif, INDEX, flags=re.I), [])
+        self.assertEqual(re.findall(motif, self.APP, flags=re.I), [])
+
+    def test_scripts_differes_dans_l_ordre(self):
+        """Chart.js ne bloque plus le rendu ; l'ordre d'exécution reste Chart.js, geo.js, app.js."""
+        scripts = re.findall(r"<script([^>]*)src=\"([^\"]+)\"", INDEX)
+        self.assertEqual([src.rsplit("/", 1)[-1] for _, src in scripts], ["theme.js", "chart.umd.js", "geo.js", "app.js"])
+        self.assertEqual(["defer" in attrs for attrs, _ in scripts], [False, True, True, True])
+
+
 class MentionsTest(unittest.TestCase):
     def test_page_et_lien(self):
         self.assertIn('id="tab-mentions"', INDEX)

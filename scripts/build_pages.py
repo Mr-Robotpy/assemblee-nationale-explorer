@@ -42,10 +42,10 @@ PARTICIPATION_INFO = ("Part des scrutins publics auxquels le député a pris par
                       "début de son mandat. Beaucoup de scrutins se tiennent en séance avec peu de députés présents : "
                       "une participation faible ne signifie pas une absence à l'Assemblée (travaux en commission, "
                       "circonscription…).")
-# Thème de l'application (localStorage « theme »), appliqué avant le rendu.
-THEME_JS = ("(function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}"
-            "if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))"
-            "document.documentElement.classList.add('dark')})();")
+# Politique de sécurité de contenu des pages statiques : aucun script en ligne (le thème vient de assets/theme.js,
+# les données structurées JSON-LD ne sont pas exécutées), aucune connexion ; les badges de groupe ont un style en ligne.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+       "font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'")
 
 
 def e(x: Any) -> str:
@@ -119,6 +119,7 @@ def page(*, titre: str, description: str, canonique: str, racine: str, corps: st
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>{e(titre)}</title>
 <meta name="description" content="{e(description)}">
 {f'<meta name="robots" content="{e(robots)}">' if robots else f'<link rel="canonical" href="{e(canonique)}">'}
@@ -129,7 +130,7 @@ def page(*, titre: str, description: str, canonique: str, racine: str, corps: st
 <meta property="og:description" content="{e(description)}">
 <meta property="og:url" content="{e(canonique)}">
 <meta name="twitter:card" content="summary">
-<script>{THEME_JS}</script>
+<script src="{e(racine)}assets/theme.js{v}"></script>
 <link rel="stylesheet" href="{e(racine)}{INTER_CSS}">
 <link rel="stylesheet" href="{e(racine)}assets/pages.css{v}">{ld}
 </head>
