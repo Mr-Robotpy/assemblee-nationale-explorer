@@ -1,0 +1,42 @@
+name: Tests
+
+# Contrôles d'une pull request avant fusion : mêmes tests et même compilation que le déploiement,
+# sans téléchargement des archives ni publication.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests du pipeline et du front statique (hors ligne)
+        run: python -m unittest discover -s tests -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Tests du front (géométrie, node --test)
+        run: node --test tests/*.test.mjs
+
+      - name: Compilation CSS (Tailwind)
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build:css
+          test -s assets/app.css
