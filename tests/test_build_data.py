@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_data as bd  # noqa: E402
 
+bd.MIN_DEPUTES = 1  # les extraits ne comptent que 6 députés ; le plancher réel est testé dans VolumesTest
+
 FIX = ROOT / "tests" / "fixtures"
 
 
@@ -639,6 +641,112 @@ class SourceIndisponibleTest(unittest.TestCase):
             self.assertEqual(fiche["questions"]["total"], 1)
             meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
             self.assertIn("questions", meta["echecs"])
+
+
+class VolumesTest(unittest.TestCase):
+    """Une archive tronquée mais valide ne doit pas remplacer les données de la veille."""
+
+    def test_controle_volume(self):
+        bd.controle_volume("scrutins", 9500, 9491)
+        bd.controle_volume("scrutins", 9000, 9491)  # -5 % : toléré
+        bd.controle_volume("scrutins", 0)  # début de législature, rien à comparer
+        bd.controle_volume("scrutins", 12, {"format": "inconnu"})  # précédent illisible : pas de comparaison
+        with self.assertRaises(bd.VolumeAnormal):
+            bd.controle_volume("scrutins", 1000, 9491)
+        with self.assertRaises(bd.VolumeAnormal):
+            bd.controle_volume("scrutins", 0, 9491)
+        with self.assertRaises(bd.VolumeAnormal):
+            bd.controle_volume("députés", 200, plancher=500)
+        bd.controle_volume("députés", 560, 574, baisse_max=bd.BAISSE_MAX_DEPUTES)  # -2 % : vacances ordinaires
+        with self.assertRaises(bd.VolumeAnormal):
+            bd.controle_volume("députés", 540, 574, baisse_max=bd.BAISSE_MAX_DEPUTES)  # -6 %
+        self.assertEqual(bd._nb_dossiers({"PJL": 3, "PPL": 5, "PJL_promulgues": 2}), 8)
+        self.assertIsNone(bd._nb_dossiers(None))
+
+    def _zips(self, tmp: Path) -> Path:
+        zips = tmp / "zips"
+        zips.mkdir()
+        for key, fix in (("amo10", "amo10"), ("dossiers", "dossiers"), ("scrutins", "scrutins"),
+                         ("questions_ecrites", "qe"), ("questions_gouvernement", "qg")):
+            make_zip(FIX / fix, zips / bd.SOURCES[key].rsplit("/", 1)[1])
+        # Archive présente mais vide : sans elle, la section questions serait en échec avant tout contrôle de volume.
+        vide = tmp / "vide"
+        vide.mkdir()
+        make_zip(vide, zips / bd.SOURCES["questions_orales"].rsplit("/", 1)[1])
+        return zips
+
+    def _gonfler(self, out: Path, modifier) -> None:
+        """Simule un passage précédent plus fourni que les extraits."""
+        meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+        modifier(meta["sections"])
+        (out / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    def test_plancher_deputes(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            out = tmp / "data"
+            args = ["--source-dir", str(self._zips(tmp)), "--out", str(out), "--no-fulltext", "--no-communes"]
+            self.assertEqual(bd.main(args + ["--min-deputes", "500"]), 1)
+            self.assertFalse((out / "deputes.json").exists())
+            self.assertEqual(bd.main(args + ["--min-deputes", "500", "--force-volumes"]), 0)
+
+    def test_baisse_des_deputes_rien_n_est_publie(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            out = tmp / "data"
+            args = ["--source-dir", str(self._zips(tmp)), "--out", str(out), "--no-fulltext", "--no-communes"]
+            self.assertEqual(bd.main(args), 0)
+            self._gonfler(out, lambda sec: sec["deputes"].update(total=577))
+            avant = {f: (out / f).read_bytes() for f in ("meta.json", "deputes.json", "scrutins.json", "questions.json")}
+            self.assertEqual(bd.main(args), 1)
+            self.assertEqual({f: (out / f).read_bytes() for f in avant}, avant)
+
+    def test_baisse_d_une_section_donnees_de_la_veille(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            out = tmp / "data"
+            args = ["--source-dir", str(self._zips(tmp)), "--out", str(out), "--no-fulltext", "--no-communes"]
+            self.assertEqual(bd.main(args), 0)
+
+            def gonfler(sec):
+                sec["scrutins"]["total"] = 9491
+                sec["dossiers"]["total"] = {"PPL": 3000}
+                sec["questions"]["total"]["QE"] = 20000
+            self._gonfler(out, gonfler)
+            fichiers = ("scrutins.json", "dossiers.json", "questions.json")
+            avant = {f: (out / f).read_bytes() for f in fichiers}
+            fiche = out / "deputes" / "PA841495.json"
+            veille = json.loads(fiche.read_text(encoding="utf-8"))
+            veille["scrutins"]["participation"] = 12.3  # valeur témoin : doit être reprise telle quelle
+            veille["propositionsDeLoi"] = 42
+            fiche.write_text(json.dumps(veille), encoding="utf-8")
+
+            self.assertEqual(bd.main(args), 0)
+            self.assertEqual({f: (out / f).read_bytes() for f in fichiers}, avant)
+            meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(meta["echecs"]), ["dossiers", "questions", "scrutins"])
+            self.assertEqual(meta["sections"]["scrutins"]["total"], 9491)  # référence conservée pour le passage suivant
+            apres = json.loads(fiche.read_text(encoding="utf-8"))
+            self.assertEqual(apres["scrutins"]["participation"], 12.3)
+            self.assertEqual(apres["propositionsDeLoi"], 42)
+            self.assertEqual(apres["questions"], veille["questions"])
+
+            self.assertEqual(bd.main(args + ["--force-volumes"]), 0)
+            self.assertEqual(json.loads((out / "meta.json").read_text(encoding="utf-8"))["echecs"], [])
+
+    def test_changement_de_legislature(self):
+        """Les compteurs repartent de zéro : pas de comparaison avec la législature précédente."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            out = tmp / "data"
+            args = ["--source-dir", str(self._zips(tmp)), "--out", str(out), "--no-fulltext", "--no-communes"]
+            self.assertEqual(bd.main(args), 0)
+            meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+            meta["legislature"] = "16"
+            meta["sections"]["scrutins"]["total"] = 9491
+            (out / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+            self.assertEqual(bd.main(args), 0)
+            self.assertEqual(json.loads((out / "meta.json").read_text(encoding="utf-8"))["echecs"], [])
 
 
 if __name__ == "__main__":

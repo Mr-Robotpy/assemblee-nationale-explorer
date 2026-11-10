@@ -159,6 +159,20 @@ Ensuite tout est automatique : exécution quotidienne, mise à jour de la branch
 Si le serveur de l'AN est indisponible, le site est redéployé avec les données de la veille et la section en
 échec est signalée dans `meta.json` (bandeau visible sur le site).
 
+## Surveillance et garde-fous
+
+- **Tests sur les pull requests** (`.github/workflows/ci.yml`) : tests Python et Node, compilation CSS, sans
+  téléchargement ni publication.
+- **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
+  rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
+  d'échec. Sur le site, un bandeau apparaît quand les données ont plus de 48 h.
+- **Volumes** (`controle_volume`) : une archive tronquée mais valide ne remplace pas les données de la veille. Sous
+  500 députés (`--min-deputes`), ou 5 % de députés en moins que la veille, rien n'est publié. Une section (scrutins,
+  dossiers, chaque type de question) qui perd plus de 10 % par rapport au passage précédent n'est pas publiée : la
+  section de la veille reste en place et figure dans `echecs`. La comparaison est ignorée après un changement de
+  législature. Si la baisse est réelle (vérifiée à la source) : **Run workflow → « forcer_volumes »**, ou
+  `--force-volumes` / `FORCE_VOLUMES=1` en local.
+
 ## Ressources tierces
 
 Polices (Inter), icônes (Font Awesome Free) et Chart.js sont **hébergés sur le site** (`assets/vendor/`), sans appel à

@@ -130,6 +130,8 @@ const pct = (v) => (v === null || v === undefined ? '—' : `${String(v).replace
 const PARTICIPATION_INFO = "Part des scrutins publics auxquels le député a pris part (y compris par délégation) depuis le début de son mandat. Beaucoup de scrutins se tiennent en séance avec peu de députés présents : une participation faible ne signifie pas une absence à l'Assemblée (travaux en commission, circonscription…).";
 const debounce = (fn, ms = 200) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
+const DONNEES_PERIMEES_MS = 48 * 3600 * 1000;
+
 async function getJSON(path) {
     if (cache.has(path)) return cache.get(path);
     const p = fetch(DATA + path, { cache: 'no-cache' }).then((r) => {
@@ -352,9 +354,16 @@ async function init() {
         $('#headerUpdated').textContent = `Données mises à jour le ${gen}`;
         $('#heroUpdated').textContent = `Open Data officiel · mis à jour le ${gen}`;
     }
-    if (meta.echecs && meta.echecs.length) {
-        showGlobalError(`Dernière mise à jour partielle : section(s) ${esc(meta.echecs.join(', '))} non rafraîchie(s), données précédentes affichées.`);
+    const alertes = [];
+    // La mise à jour est quotidienne : au-delà de 48 h, au moins deux passages ont échoué.
+    const age = meta.generation ? Date.now() - Date.parse(meta.generation) : NaN;
+    if (age > DONNEES_PERIMEES_MS) {
+        alertes.push(`Les données n'ont pas été mises à jour depuis ${Math.floor(age / 86400000)} jours (dernière mise à jour le ${esc(gen)}) : les votes, questions et étapes les plus récents peuvent manquer.`);
     }
+    if (meta.echecs && meta.echecs.length) {
+        alertes.push(`Dernière mise à jour partielle : section(s) ${esc(meta.echecs.join(', '))} non rafraîchie(s), données précédentes affichées.`);
+    }
+    if (alertes.length) showGlobalError(alertes.join('<br>'));
 
     await loadLists(['deputes', 'groupes', 'dossiers']);
     state.ready = true;

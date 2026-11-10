@@ -1421,6 +1421,34 @@ def fetch_sources(names: Iterable[str], cache: Path, source_dir: Path | None) ->
     return out
 
 
+# ----------------------------------------------------------------------------------------------- garde-fous de volume
+# Une archive tronquée mais valide (200 députés, 1 000 scrutins) se traite sans erreur : sans contrôle, elle
+# remplacerait les données de la veille sur la branche `data`, réécrite en un seul commit (pas de retour arrière).
+MIN_DEPUTES = 500  # 577 sièges ; les vacances (ministres, partielles) n'en retirent jamais autant
+BAISSE_MAX_DEPUTES = 0.05  # ≈ 29 sièges d'un jour à l'autre : aucune vacance réelle n'atteint ce nombre
+BAISSE_MAX = 0.10  # au sein d'une législature, scrutins, dossiers et questions ne font que s'accumuler
+
+
+class VolumeAnormal(Exception):
+    """Volume incohérent avec le passage précédent : la section n'est pas publiée."""
+
+
+def controle_volume(nom: str, n: int, precedent: Any = None, plancher: int = 0, baisse_max: float = BAISSE_MAX) -> None:
+    """Refuse `n` s'il est sous `plancher` ou s'il a perdu plus de `baisse_max` par rapport à `precedent`."""
+    if n < plancher:
+        raise VolumeAnormal(f"{nom} : {n}, sous le plancher de {plancher}")
+    if isinstance(precedent, int) and precedent > 0 and n < precedent * (1 - baisse_max):
+        raise VolumeAnormal(f"{nom} : {n} contre {precedent} au passage précédent "
+                            f"(baisse de {100 * (precedent - n) / precedent:.0f} %, maximum {100 * baisse_max:.0f} %)")
+
+
+def _nb_dossiers(total: Any) -> int | None:
+    """Nombre de dossiers de la législature, d'après le compteur par catégorie de `meta.json`."""
+    if not isinstance(total, dict):
+        return None
+    return sum(v for k, v in total.items() if isinstance(v, int) and not k.endswith("_promulgues"))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="data", type=Path)
@@ -1443,6 +1471,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-communes", action="store_true", help="ne pas construire la table commune → circonscription")
     ap.add_argument("--force-communes", action="store_true", help="reconstruire la table des communes même récente")
     ap.add_argument("--force-circos", action="store_true", help="republier les contours de circonscriptions même récents")
+    ap.add_argument("--min-deputes", type=int, default=int(os.environ.get("MIN_DEPUTES", MIN_DEPUTES)),
+                    help="nombre de députés sous lequel rien n'est publié")
+    ap.add_argument("--force-volumes", action="store_true", default=os.environ.get("FORCE_VOLUMES", "") in ("1", "true"),
+                    help="publier malgré une baisse anormale de volume (après vérification à la source)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(message)s")
@@ -1455,6 +1487,13 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     src = fetch_sources(SOURCES, args.cache, args.source_dir)
     failures = []
+    # Volumes du passage précédent ; ignorés après un changement de législature (les compteurs repartent de zéro).
+    avant = meta["sections"] if meta.get("legislature") == LEGISLATURE else {}
+
+    def volume(nom: str, n: int, precedent: Any = None, plancher: int = 0, baisse_max: float = BAISSE_MAX) -> None:
+        if args.force_volumes:
+            return
+        controle_volume(nom, n, precedent, plancher, baisse_max)
 
     ref = Referentiel()
     if "amo20" in src:
@@ -1467,11 +1506,18 @@ def main(argv: list[str] | None = None) -> int:
     ref.load_amo(src["amo10"], keep_acteurs=True)
     summaries, details, groupes = build_deputes(ref)
     LOG.info("%d députés, %d groupes", len(summaries), len(groupes))
+    try:
+        volume("députés", len(summaries), (avant.get("deputes") or {}).get("total"), args.min_deputes, BAISSE_MAX_DEPUTES)
+    except VolumeAnormal as e:
+        # Toutes les sections s'appuient sur l'annuaire : rien n'est écrit, les données précédentes restent en place.
+        LOG.error("%s. Rien n'est publié (--force-volumes pour passer outre).", e)
+        return 1
 
     # --- scrutins
     if "scrutins" in src:
         try:
             scrutins, sc_meta = build_scrutins(src["scrutins"], ref, details, args.max_scrutins, 15)
+            volume("scrutins", sc_meta["total"], (avant.get("scrutins") or {}).get("total"))
             write_json(out / "scrutins.json", compact_scrutins(scrutins))
             avec_groupes = sum(1 for x in scrutins if x["groupes"] is not None)
             # Les 5 derniers, pour l'accueil : meta.json est chargé au démarrage, l'index complet à la demande.
@@ -1483,13 +1529,18 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             LOG.exception("Échec section scrutins")
             failures.append("scrutins")
+            # Les fiches des députés reprennent alors la participation de la veille, cohérente avec l'index conservé.
+            for d in details.values():
+                d.pop("scrutins", None)
 
     # --- dossiers
     dossiers_meta = {}
     if "dossiers" in src:
         try:
             cats = {"PJL", "PPL"} if args.lois_seulement else {"PJL", "PPL", "AUTRE"}
-            index, by_uid, dossiers_meta = build_dossiers(src["dossiers"], ref, args.max_dossiers, cats)
+            index, by_uid, d_meta = build_dossiers(src["dossiers"], ref, args.max_dossiers, cats)
+            volume("dossiers", _nb_dossiers(d_meta["total"]), _nb_dossiers((avant.get("dossiers") or {}).get("total")))
+            dossiers_meta = d_meta
             n_txt = 0
             if not args.no_fulltext and not args.source_dir:
                 n_txt = fetch_fulltexts(by_uid, out / "textes", args.fulltext_per_run, delay=1.0, perimetre=args.max_textes)
@@ -1525,6 +1576,10 @@ def main(argv: list[str] | None = None) -> int:
     if qpaths:
         try:
             q_index, q_details, q_meta = build_questions(qpaths, ref, {"QE": args.max_qe, "QG": args.max_qg, "QOSD": args.max_qosd})
+            q_avant = (avant.get("questions") or {}).get("total")
+            for qtype, n_avant in (q_avant.items() if isinstance(q_avant, dict) else ()):
+                if qtype in qpaths:  # un type dont l'archive manque est déjà signalé plus haut
+                    volume(f"questions {qtype}", q_meta["total"].get(qtype, 0), n_avant)
             reset_dir(out / "questions")
             for uid, q in q_details.items():
                 write_json(out / "questions" / f"{uid}.json", q)

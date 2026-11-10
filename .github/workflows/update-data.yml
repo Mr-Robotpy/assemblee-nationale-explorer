@@ -10,6 +10,11 @@ on:
     # Tous les jours à 04:23 UTC (≈ 05:23 / 06:23 à Paris). Les archives AN sont régénérées dans la nuit.
     - cron: "23 4 * * *"
   workflow_dispatch:
+    inputs:
+      forcer_volumes:
+        description: "Publier malgré une baisse anormale de volume (après vérification à la source)"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -28,6 +33,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      generation: ${{ steps.build.outcome }}
+      echecs: ${{ steps.etat.outputs.echecs }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,7 +61,16 @@ jobs:
         id: build
         # En cas d'indisponibilité du serveur AN, on redéploie les données précédentes.
         continue-on-error: true
+        env:
+          FORCE_VOLUMES: ${{ inputs.forcer_volumes && '1' || '' }}
         run: python scripts/build_data.py
+
+      - name: État des données (sections en échec)
+        id: etat
+        if: steps.build.outcome == 'success'
+        run: |
+          echecs=$(python -c "import json; print(' '.join(json.load(open('data/meta.json')).get('echecs', [])))")
+          echo "echecs=${echecs}" >> "$GITHUB_OUTPUT"
 
       - name: Publication sur la branche data
         if: steps.build.outcome == 'success'
@@ -108,3 +125,25 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Le site est redéployé même quand la génération échoue (données de la veille) : sans ce contrôle, le passage
+  # resterait vert et une panne durerait sans que personne ne soit prévenu. Un passage rouge déclenche le courriel
+  # de GitHub ; il ne bloque pas le déploiement, lancé en parallèle.
+  controle:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Données à jour ?
+        env:
+          GENERATION: ${{ needs.build.outputs.generation }}
+          ECHECS: ${{ needs.build.outputs.echecs }}
+        run: |
+          if [ "$GENERATION" != "success" ]; then
+            echo "::error::La génération des données a échoué : le site a été redéployé avec les données précédentes."
+            exit 1
+          fi
+          if [ -n "$ECHECS" ]; then
+            echo "::error::Sections non rafraîchies (données précédentes conservées) : $ECHECS"
+            exit 1
+          fi
+          echo "Toutes les sections ont été rafraîchies."
