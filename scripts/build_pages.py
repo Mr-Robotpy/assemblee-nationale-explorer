@@ -443,7 +443,8 @@ def main(argv: list[str] | None = None) -> int:
     if not (args.data / "deputes.json").exists():
         LOG.error("%s introuvable : lancer d'abord scripts/build_data.py", args.data / "deputes.json")
         return 1
-    n = build(args.data, args.out, args.base_url, args.version)
+    # Adresse vide (configuration de Pages muette) : adresse connue du site plutôt que des liens canoniques relatifs.
+    n = build(args.data, args.out, args.base_url.strip() or BASE_URL, args.version)
     LOG.info("Pages statiques : %(deputes)d députés, %(dossiers)d dossiers, %(urls)d adresses dans sitemap.xml", n)
     return 0
 

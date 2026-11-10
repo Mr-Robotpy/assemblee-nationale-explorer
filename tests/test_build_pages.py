@@ -178,6 +178,17 @@ class SiteTest(unittest.TestCase):
             self.assertNotIn("PA841495", (out / "sitemap.xml").read_text(encoding="utf-8"))
 
 
+class AdresseTest(unittest.TestCase):
+    def test_adresse_vide_adresse_connue(self):
+        """Le déploiement passe l'adresse lue dans GitHub Pages : vide, elle ne doit pas donner d'adresses relatives."""
+        with tempfile.TemporaryDirectory() as t:
+            site = Path(t) / "site"
+            self.assertEqual(make_site.main(site), 0)
+            self.assertEqual(bp.main(["--data", str(site / "data"), "--out", str(site), "--base-url", ""]), 0)
+            self.assertIn(f"<loc>{bp.BASE_URL}/depute/PA841495.html</loc>", (site / "sitemap.xml").read_text(encoding="utf-8"))
+            self.assertEqual(bp.main(["--data", str(site / "absent"), "--out", str(site)]), 1)
+
+
 class EchappementTest(unittest.TestCase):
     """Les données viennent de l'extérieur : rien ne doit sortir du texte."""
 
