@@ -38,6 +38,8 @@ jobs:
       echecs: ${{ steps.etat.outputs.echecs }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # pour comparer un push au commit précédent (étape « Faut-il régénérer »)
 
       - uses: actions/setup-python@v5
         with:
@@ -57,8 +59,35 @@ jobs:
             echo "Pas encore de branche data (premier passage)."
           fi
 
+      # Un push qui ne touche pas au pipeline redéploie le code avec les données déjà publiées : inutile de
+      # retélécharger les archives pour un correctif d'affichage. Le passage planifié ou manuel régénère toujours.
+      # Dans le doute (aucune donnée, commit précédent inconnu), on régénère.
+      - name: Faut-il régénérer les données ?
+        id: plan
+        env:
+          EVENEMENT: ${{ github.event_name }}
+          AVANT: ${{ github.event.before }}
+        run: |
+          regen=true
+          raison="passage planifié ou manuel"
+          if [ "$EVENEMENT" = "push" ]; then
+            if [ ! -s data/meta.json ]; then
+              raison="aucune donnée publiée"
+            elif ! git cat-file -e "${AVANT}^{commit}" 2>/dev/null; then
+              raison="commit précédent inconnu"
+            elif git diff --name-only "$AVANT" "$GITHUB_SHA" | grep -qx "scripts/build_data.py"; then
+              raison="scripts/build_data.py modifié"
+            else
+              regen=false
+              raison="le push ne modifie pas scripts/build_data.py : données publiées conservées"
+            fi
+          fi
+          echo "regen=${regen}" >> "$GITHUB_OUTPUT"
+          echo "Régénération : ${regen} (${raison})"
+
       - name: Génération des JSON depuis l'Open Data AN
         id: build
+        if: steps.plan.outputs.regen == 'true'
         # En cas d'indisponibilité du serveur AN, on redéploie les données précédentes.
         continue-on-error: true
         env:
@@ -145,6 +174,10 @@ jobs:
           GENERATION: ${{ needs.build.outputs.generation }}
           ECHECS: ${{ needs.build.outputs.echecs }}
         run: |
+          if [ "$GENERATION" = "skipped" ]; then
+            echo "Push sans changement du pipeline : code redéployé avec les données déjà publiées."
+            exit 0
+          fi
           if [ "$GENERATION" != "success" ]; then
             echo "::error::La génération des données a échoué : le site a été redéployé avec les données précédentes."
             exit 1

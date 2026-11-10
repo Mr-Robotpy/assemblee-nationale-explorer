@@ -199,6 +199,9 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
   partagée entre deux circonscriptions) et un géocodeur simulé : calcul dans les contours, confirmation d'une voie
   différente de la saisie, réponse douteuse refusée, service en panne, « Me localiser ». Aucun test ne sort sur le réseau. Chaque test échoue aussi sur une erreur JavaScript,
   un fichier manquant ou une requête vers un autre site.
+- **Code et données séparés** : un push sur `main` qui ne modifie pas `scripts/build_data.py` redéploie le code avec
+  les données déjà publiées, sans retélécharger les archives. Le passage quotidien et le lancement manuel régénèrent
+  toujours ; dans le doute (aucune donnée publiée, commit précédent inconnu), un push régénère aussi.
 - **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
   d'échec. Sur le site, un bandeau apparaît quand les données ont plus de 48 h.
