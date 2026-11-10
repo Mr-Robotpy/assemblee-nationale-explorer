@@ -2,7 +2,7 @@
 
     python tests/e2e/make_site.py <dossier>
 
-Même chaîne que la production (build_data.py, index.html, assets/), sans réseau.
+Même chaîne que la production (build_data.py, build_pages.py, index.html, assets/), sans réseau.
 """
 import logging
 import shutil
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests" / "fixtures"
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_data as bd  # noqa: E402
+import build_pages  # noqa: E402
 
 ARCHIVES = {"amo10": "amo10", "dossiers": "dossiers", "scrutins": "scrutins",
             "questions_ecrites": "qe", "questions_gouvernement": "qg", "questions_orales": None}
@@ -36,6 +37,7 @@ def main(dest: Path) -> int:
     shutil.rmtree(zips)
     shutil.copy(ROOT / "index.html", dest / "index.html")
     shutil.copytree(ROOT / "assets", dest / "assets")
+    build_pages.build(dest / "data", dest, build_pages.BASE_URL)
     return rc
 
 

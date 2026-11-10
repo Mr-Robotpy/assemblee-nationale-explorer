@@ -141,6 +141,35 @@ questions et scrutins de toute la législature) ou **sélection publiée**, avec
 « liste complète » est calculé (éléments publiés ≥ total de la législature) : il disparaît si un plafond
 `MAX_DOSSIERS` est fixé, ou si un index de l'ancien format est conservé après l'échec d'une source.
 
+## Pages référençables
+
+Les fiches de l'application vivent derrière `#/…` : un moteur de recherche n'y voit qu'une seule page, et un lien
+partagé n'a ni titre ni aperçu propre. À chaque déploiement, `scripts/build_pages.py` écrit donc à partir des JSON :
+
+| Adresse | Contenu |
+|---|---|
+| `depute/<PA…>.html` | une page par député en exercice : groupe, circonscription, organes, participation, derniers votes et questions |
+| `dossier/<DLR…>.html` | une page par dossier publié : statut, étapes, parcours daté, documents officiels |
+| `depute/`, `dossier/` | listes complètes (liens du pied de page), pour que chaque page soit reliée au site |
+| `sitemap.xml` | toutes ces adresses, avec la date de dernière étape des dossiers |
+| `404.html` | page servie pour une adresse disparue (fin de mandat) |
+
+Chaque page porte un titre, une description, une adresse canonique, des balises Open Graph et un bouton « Ouvrir la
+fiche interactive » ; elle se lit sans JavaScript et ne charge rien d'un autre site (feuille `assets/pages.css`,
+indépendante de Tailwind). Les pages ne sont pas stockées sur la branche `data` : elles sont dérivées des JSON, y
+compris quand la génération a échoué et que le site est redéployé avec les données de la veille.
+
+- **Données personnelles** : la page d'un député se limite à son mandat. Date et lieu de naissance, profession et
+  coordonnées restent sur la fiche interactive, que les moteurs ne référencent pas (testé). Le taux de participation
+  est toujours accompagné de son avertissement. La page disparaît à la fin du mandat.
+- **Adresse du site** : lue dans la configuration de GitHub Pages (`steps.pages.outputs.base_url`), donc correcte
+  aussi avec un nom de domaine personnalisé.
+- **Faire connaître le plan du site** : un `robots.txt` n'est lu qu'à la racine d'un domaine ; sur
+  `<compte>.github.io/<dépôt>/` il serait ignoré. Le plan du site se déclare donc dans Google Search Console et Bing
+  Webmaster Tools (vérification par fichier HTML, sans script ni cookie sur le site).
+
+En local : `python scripts/build_pages.py --data data --out .` (fichiers ignorés par git).
+
 ## Suivis
 
 Bouton « Suivre » sur les fiches de dossiers et de députés ; page `#/suivis` (étoile de l'en-tête). Les suivis sont
@@ -165,7 +194,7 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
   dans un navigateur, sans téléchargement ni publication.
 - **Tests de navigateur** (`tests/e2e/front.test.mjs`, Playwright) : `tests/e2e/make_site.py` construit un site complet
   à partir des extraits de `tests/fixtures` avec la chaîne de production, puis Chromium vérifie les listes, les filtres
-  dans l'URL, les fiches, les suivis, la recherche et les bandeaux. Chaque test échoue aussi sur une erreur JavaScript,
+  dans l'URL, les fiches, les suivis, la recherche, les bandeaux et les pages statiques (JavaScript désactivé). Chaque test échoue aussi sur une erreur JavaScript,
   un fichier manquant ou une requête vers un autre site.
 - **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
