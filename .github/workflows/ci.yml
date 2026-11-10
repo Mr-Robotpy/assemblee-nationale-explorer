@@ -1,7 +1,7 @@
 name: Tests
 
-# Contrôles d'une pull request avant fusion : mêmes tests et même compilation que le déploiement,
-# sans téléchargement des archives ni publication.
+# Contrôles d'une pull request avant fusion : mêmes tests et même compilation que le déploiement, plus les tests
+# de navigateur, sans téléchargement des archives ni publication.
 
 on:
   pull_request:
@@ -40,3 +40,8 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build:css
           test -s assets/app.css
+
+      - name: Tests du front dans un navigateur (Playwright, site construit depuis les extraits)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e

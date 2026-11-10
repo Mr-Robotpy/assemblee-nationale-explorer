@@ -161,8 +161,12 @@ Si le serveur de l'AN est indisponible, le site est redéployé avec les donnée
 
 ## Surveillance et garde-fous
 
-- **Tests sur les pull requests** (`.github/workflows/ci.yml`) : tests Python et Node, compilation CSS, sans
-  téléchargement ni publication.
+- **Tests sur les pull requests** (`.github/workflows/ci.yml`) : tests Python et Node, compilation CSS, tests du front
+  dans un navigateur, sans téléchargement ni publication.
+- **Tests de navigateur** (`tests/e2e/front.test.mjs`, Playwright) : `tests/e2e/make_site.py` construit un site complet
+  à partir des extraits de `tests/fixtures` avec la chaîne de production, puis Chromium vérifie les listes, les filtres
+  dans l'URL, les fiches, les suivis, la recherche et les bandeaux. Chaque test échoue aussi sur une erreur JavaScript,
+  un fichier manquant ou une requête vers un autre site.
 - **Panne signalée** : le site est toujours redéployé (données de la veille si besoin), mais le job `controle` passe au
   rouge si la génération a échoué ou si `meta.json` liste des sections en échec — GitHub envoie alors son courriel
   d'échec. Sur le site, un bandeau apparaît quand les données ont plus de 48 h.
@@ -198,6 +202,7 @@ python scripts/build_data.py          # télécharge ~90 Mo d'archives et génè
 python -m http.server 8000            # puis http://localhost:8000
 python -m unittest discover -s tests  # tests hors ligne sur des extraits réels de l'Open Data
 node --test tests/*.test.mjs           # tests de géométrie (recherche par adresse)
+npm ci && npx playwright install chromium && npm run test:e2e   # tests du front dans un navigateur
 npm ci && npm run build:css           # uniquement si vous modifiez les classes Tailwind
 ```
 
